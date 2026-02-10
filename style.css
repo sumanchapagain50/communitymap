@@ -1,0 +1,132 @@
+* {
+  box-sizing: border-box;
+  font-family: Arial, sans-serif;
+}
+
+html, body {
+  margin: 0;
+  height: 100%;
+}
+
+#app {
+  display: flex;
+  height: 100vh;
+}
+
+/* Sidebar */
+#sidebar {
+  width: 300px;
+  padding: 16px;
+  background: #f9f9f9;
+  border-right: 1px solid #ddd;
+  overflow-y: auto;
+}
+
+#sidebar h2 {
+  margin-top: 0;
+}
+
+#sidebar label {
+  font-weight: bold;
+  display: block;
+  margin: 10px 0 4px;
+}
+
+#sidebar select, #sidebar input[type="text"] {
+  width: 100%;
+  padding: 6px;
+  margin-bottom: 10px;
+}
+
+/* Toggle alignment */
+.toggle-container {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.toggle-container input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.toggle-container label {
+  margin: 0;
+  cursor: pointer;
+}
+
+/* Community tabs */
+.tabs-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.tab {
+  padding: 8px 10px;
+  background: #e5e7eb;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s;
+  font-weight: bold;
+}
+
+.tab:hover {
+  background: #dbeafe;
+}
+
+.tab.active {
+  background: #2563eb;
+  color: #fff;
+}
+
+/* Map */
+#map {
+  flex: 1;
+}
+
+/* Popup */
+.popup-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.popup-tabs button {
+  flex: 1;
+  padding: 6px;
+  cursor: pointer;
+  border: 1px solid #ccc;
+  background: #eee;
+}
+
+.popup-tabs button.active {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
+}
+
+.popup-content {
+  font-size: 13px;
+}
+
+.hidden {
+  display: none;
+}
+
+.score {
+  margin-bottom: 6px;
+}
+
+/* Permanent labels */
+.permanent-tooltip {
+  background: rgba(255,255,255,0.9);
+  border: 1px solid #333;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: bold;
+  font-size: 12px;
+}
