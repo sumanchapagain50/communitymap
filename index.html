@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Community Resilience Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="style.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+    <div id="map"></div>
+
+    <button id="show-sidebar-btn" class="sidebar-toggle-fixed hidden">Show Sidebar</button>
+
+    <!-- Integrated Sidebar -->
+    <div id="sidebar" class="sidebar active">
+        <div class="sidebar-header">
+            <div class="header-controls">
+                <button id="toggle-sidebar" class="toggle-btn">Hide Sidebar</button>
+                <button id="exit-compare-btn" class="toggle-btn danger hidden">Exit Comparison</button>
+                <button id="admin-login-btn" class="toggle-btn">Admin Login</button>
+                <button id="manage-communities-btn" class="toggle-btn hidden">Manage Communities</button>
+                <button id="manage-activities-btn" class="toggle-btn hidden">Manage Activities</button>
+                <button id="manage-users-btn" class="toggle-btn hidden">Manage Users</button>
+                <button id="manage-indicators-btn" class="toggle-btn hidden">Manage Indicators</button>
+                <button id="manage-knowledge-btn" class="toggle-btn hidden">Manage Knowledge</button>
+                <button id="archived-communities-btn" class="toggle-btn hidden">Archive</button>
+                <button id="kro-dashboard-btn" class="toggle-btn hidden">Reach Dashboard</button>
+                <button id="admin-logout-btn" class="toggle-btn danger hidden">Logout</button>
+            </div>
+        </div>
+
+        <div class="sidebar-content-wrapper">
+            <!-- Column 1: Main Community -->
+            <div class="sidebar-column" id="col-main">
+                <div class="column-info">
+                    <div class="country-zoom">
+                        <select id="country-select">
+                            <option value="All">All Communities</option>
+                            <option value="Nepal">Nepal Only</option>
+                            <option value="Bangladesh">Bangladesh Only</option>
+                        </select>
+                    </div>
+                    <h2 id="community-name">Community Name</h2>
+                    <!-- Admin Edit Button (injected by JS) -->
+                    <div id="admin-edit-area"></div>
+                </div>
+
+                <div class="tabs">
+                    <button class="tab-btn active" data-tab="score" data-col="main">Resilience</button>
+                    <button class="tab-btn" data-tab="demographics" data-col="main">Demographics</button>
+                    <button class="tab-btn" data-tab="activities" data-col="main">Activities</button>
+                    <button class="tab-btn" data-tab="knowledge" data-col="main">Knowledge</button>
+                </div>
+
+                <div class="tab-content" id="tab-score-main">
+                    <div class="resilience-scroll-area">
+                        <div id="gauge-group-main" class="hidden">
+                            <div class="gauge-container">
+                                <canvas id="gauge-canvas-main"></canvas>
+                                <div class="gauge-labels">
+                                    <span id="label-t0-main">T0 (Baseline)</span>
+                                    <span id="label-t1-main">T1 (Current)</span>
+                                </div>
+                                <div class="gauge-toggles">
+                                    <label><input type="checkbox" id="show-t0-main" checked> T0</label>
+                                    <label><input type="checkbox" id="show-t1-main" checked> T1</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="capitals-container-main" class="capitals-list"></div>
+                    </div>
+                    <div class="fixed-controls">
+                        <div class="expansion-controls">
+                            <button id="accordion-toggle-main" class="toggle-btn-small active">Accordion: ON</button>
+                        </div>
+                        <button id="open-compare-btn" class="compare-btn-main">Compare with another community</button>
+                    </div>
+                </div>
+
+                <div class="tab-content hidden" id="tab-demographics-main">
+                    <div id="demographics-text-main" class="info-card"></div>
+                </div>
+
+                <div class="tab-content hidden" id="tab-activities-main">
+                    <div class="tab-scroll-area">
+                        <ul id="activities-list-main" class="activity-items"></ul>
+                    </div>
+                </div>
+
+                <div class="tab-content hidden" id="tab-knowledge-main">
+                    <div class="tab-scroll-area">
+                        <ul id="knowledge-list-main" class="activity-items"></ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Column 2: Comparison Community -->
+            <div class="sidebar-column hidden" id="col-compare">
+                <div class="column-info">
+                    <div class="compare-select-container">
+                        <select id="compare-community-select-v2">
+                            <option value="" disabled selected>Select Community to Compare...</option>
+                        </select>
+                    </div>
+                    <h2 id="compare-community-name">Compare</h2>
+                </div>
+
+                <div class="tabs">
+                    <button class="tab-btn active" data-tab="score" data-col="compare">Resilience</button>
+                    <button class="tab-btn" data-tab="demographics" data-col="compare">Demographics</button>
+                    <button class="tab-btn" data-tab="activities" data-col="compare">Activities</button>
+                    <button class="tab-btn" data-tab="knowledge" data-col="compare">Knowledge</button>
+                </div>
+
+                <div class="tab-content" id="tab-score-compare">
+                    <div class="resilience-scroll-area">
+                        <div id="gauge-group-compare" class="hidden">
+                            <div class="gauge-container">
+                                <canvas id="gauge-canvas-compare"></canvas>
+                                <div class="gauge-labels">
+                                    <span id="label-t0-compare">T0 (Baseline)</span>
+                                    <span id="label-t1-compare">T1 (Current)</span>
+                                </div>
+                                <div class="gauge-toggles">
+                                    <label><input type="checkbox" id="show-t0-compare" checked> T0</label>
+                                    <label><input type="checkbox" id="show-t1-compare" checked> T1</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="capitals-container-compare" class="capitals-list"></div>
+                    </div>
+                    <div class="fixed-controls">
+                        <div class="expansion-controls">
+                            <button id="accordion-toggle-compare" class="toggle-btn-small active">Accordion: ON</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-content hidden" id="tab-demographics-compare">
+                    <div id="demographics-text-compare" class="info-card"></div>
+                </div>
+
+                <div class="tab-content hidden" id="tab-activities-compare">
+                    <div class="tab-scroll-area">
+                        <ul id="activities-list-compare" class="activity-items"></ul>
+                    </div>
+                </div>
+
+                <div class="tab-content hidden" id="tab-knowledge-compare">
+                    <div class="tab-scroll-area">
+                        <ul id="knowledge-list-compare" class="activity-items"></ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login Modal -->
+    <div id="login-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3>Login</h3>
+            <div class="form-group">
+                <label for="admin-role">Select Role</label>
+                <select id="admin-role">
+                    <option value="Officer">Officer (Data Entry)</option>
+                    <option value="KRO">KRO (Admin & Dashboard)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="admin-username">Username</label>
+                <input type="text" id="admin-username" placeholder="Enter username...">
+            </div>
+            <div class="form-group">
+                <label for="admin-password">Password</label>
+                <input type="password" id="admin-password" placeholder="Enter password...">
+                <p id="login-error" class="error-text hidden">Incorrect username or password.</p>
+            </div>
+            <div class="modal-actions">
+                <button id="login-submit" class="toggle-btn primary">Login</button>
+                <button id="login-cancel" class="toggle-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add / Edit Community Modal -->
+    <div id="add-community-modal" class="modal hidden">
+        <div class="modal-content large">
+            <h3 id="community-modal-title">Add New Community</h3>
+            <div class="form-tabs">
+                <button class="form-tab-btn active" data-form-tab="basics">1. Basics</button>
+                <button class="form-tab-btn" data-form-tab="demo">2. Demographics</button>
+                <button class="form-tab-btn" data-form-tab="resilience">3. Resilience</button>
+                <button class="form-tab-btn" data-form-tab="grading">4. Grading</button>
+                <button class="form-tab-btn" data-form-tab="comm-activities">5. Activities</button>
+            </div>
+
+            <!-- Hidden field for edit mode -->
+            <input type="hidden" id="edit-comm-id" value="">
+
+            <form id="add-community-form">
+                <!-- Tab 1: Basics -->
+                <div class="form-section" id="form-basics">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Name</label>
+                            <input type="text" id="new-comm-name" placeholder="e.g., Kathmandu" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Country</label>
+                            <select id="new-comm-country" required>
+                                <option value="Nepal">Nepal</option>
+                                <option value="Bangladesh">Bangladesh</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Province</label>
+                            <input type="text" id="new-comm-province" placeholder="e.g., Bagmati">
+                        </div>
+                        <div class="form-group">
+                            <label>District</label>
+                            <input type="text" id="new-comm-district" placeholder="e.g., Sindhupalchok">
+                        </div>
+                        <div class="form-group">
+                            <label>Coordinates (Lat, Lng) — click map or type</label>
+                            <input type="text" id="new-comm-coords" placeholder="e.g., 27.7172, 85.3240">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 2: Demographics -->
+                <div class="form-section hidden" id="form-demo">
+                    <div class="form-grid">
+                        <div class="form-group"><label>Total Population</label><input type="number" id="new-demo-total" value="0"></div>
+                        <div class="form-group"><label>Male</label><input type="number" id="new-demo-male" value="0"></div>
+                        <div class="form-group"><label>Female</label><input type="number" id="new-demo-female" value="0"></div>
+                        <div class="form-group"><label>Children</label><input type="number" id="new-demo-children" value="0"></div>
+                        <div class="form-group"><label>Elderly</label><input type="number" id="new-demo-elderly" value="0"></div>
+                        <div class="form-group"><label>Disabilities</label><input type="number" id="new-demo-disabilities" value="0"></div>
+                    </div>
+                    <div class="form-group" style="margin-top: 10px;">
+                        <label>Description (Main Livelihood, etc.)</label>
+                        <input type="text" id="new-demo-desc" placeholder="e.g., Agriculture | High Vulnerability">
+                    </div>
+                </div>
+
+                <!-- Tab 3: Resilience Scores -->
+                <div class="form-section hidden" id="form-resilience">
+                    <div class="form-grid">
+                        <div class="form-group"><label>Baseline Score (T0)</label><input type="number" id="new-score-t0" value="0" min="0" max="100"></div>
+                        <div class="form-group"><label>Current Score (T1)</label><input type="number" id="new-score-t1" value="0" min="0" max="100"></div>
+                    </div>
+                </div>
+
+                <!-- Tab 4: Grading -->
+                <div class="form-section hidden" id="form-grading">
+                    <div id="gradings-grid" class="form-grid-three">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Tab 5: Activities -->
+                <div class="form-section hidden" id="form-comm-activities">
+                    <p class="form-hint">Select activities associated with this community. You can also add a new activity below.</p>
+                    <div id="activity-checklist" class="activity-checklist">
+                        <!-- Populated by JS -->
+                    </div>
+                    <div class="act-new-inline">
+                        <h4>+ Add New Activity</h4>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Activity Name</label>
+                                <input type="text" id="inline-new-act-name" placeholder="e.g., Tree Plantation" list="activity-name-suggestions">
+                            </div>
+                            <div class="form-group">
+                                <label>Execution Year</label>
+                                <input type="number" id="inline-act-year" placeholder="e.g., 2024" min="2000" max="2100">
+                            </div>
+                            <div class="form-group">
+                                <label>Quarter</label>
+                                <select id="inline-act-quarter">
+                                    <option value="1">1</option>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                    <option value="4">4</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Assign to Indicators</label>
+                            <div id="inline-indicator-checklist" class="indicator-checklist">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Beneficiaries (Optional)</label>
+                            <div class="form-grid-three">
+                                <div><small>Men</small><input type="number" id="inline-ben-men" value="0"></div>
+                                <div><small>Women</small><input type="number" id="inline-ben-women" value="0"></div>
+                                <div><small>Old Men</small><input type="number" id="inline-ben-oldMen" value="0"></div>
+                                <div><small>Old Women</small><input type="number" id="inline-ben-oldWomen" value="0"></div>
+                                <div><small>New Men</small><input type="number" id="inline-ben-newMen" value="0"></div>
+                                <div><small>New Women</small><input type="number" id="inline-ben-newWomen" value="0"></div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="check-label" style="width: auto; padding: 10px;">
+                                <input type="checkbox" id="inline-act-knowledge"> Knowledge Generated?
+                            </label>
+                        </div>
+                        <button type="button" id="add-inline-activity-btn" class="toggle-btn-small">Add Activity</button>
+                    </div>
+                </div>
+            </form>
+
+            <div class="modal-actions">
+                <button type="button" id="delete-comm-btn" class="toggle-btn danger hidden" style="margin-right: auto;">Delete / Archive</button>
+                <button type="button" id="add-comm-submit" class="toggle-btn primary">Save Community</button>
+                <button type="button" id="add-comm-cancel" class="toggle-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manage Communities Modal -->
+    <div id="manage-communities-modal" class="modal hidden">
+        <div class="modal-content large" style="max-height: 85vh;">
+            <h3 style="color: var(--primary);">Manage Communities</h3>
+            <p class="form-hint" style="margin-top: -15px;">List of all active communities. Use the main sidebar to add NEW communities.</p>
+            
+            <div id="manage-communities-list" style="max-height: 400px; overflow-y: auto; margin-top: 15px;">
+                <!-- Populated by JS -->
+            </div>
+            
+            <div class="modal-actions">
+                <button type="button" id="close-communities-modal" class="toggle-btn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manage Activities Modal -->
+    <div id="manage-activities-modal" class="modal hidden">
+        <div class="modal-content large">
+            <h3>Manage Activities</h3>
+
+            <!-- Add New Activity Section -->
+            <div class="manage-act-add">
+                <h4 style="margin-bottom: 12px; color: var(--primary);">Add / Edit Activity</h4>
+                <input type="hidden" id="act-edit-id" value="">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Activity Name</label>
+                        <input type="text" id="act-name-input" placeholder="e.g., Tree Plantation" list="activity-name-suggestions">
+                        <datalist id="activity-name-suggestions"></datalist>
+                    </div>
+                    <div class="form-group">
+                        <label>Execution Year</label>
+                        <input type="number" id="act-year-input" placeholder="e.g., 2024" min="2000" max="2100">
+                    </div>
+                    <div class="form-group">
+                        <label>Quarter</label>
+                        <select id="act-quarter-input">
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-top: 10px;">
+                    <label>Beneficiaries</label>
+                    <div class="form-grid-three">
+                        <div><small>Men</small><input type="number" id="act-ben-men" value="0"></div>
+                        <div><small>Women</small><input type="number" id="act-ben-women" value="0"></div>
+                        <div><small>Old Men</small><input type="number" id="act-ben-oldMen" value="0"></div>
+                        <div><small>Old Women</small><input type="number" id="act-ben-oldWomen" value="0"></div>
+                        <div><small>New Men</small><input type="number" id="act-ben-newMen" value="0"></div>
+                        <div><small>New Women</small><input type="number" id="act-ben-newWomen" value="0"></div>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-top: 10px;">
+                    <label class="check-label" style="width: auto; padding: 10px;">
+                        <input type="checkbox" id="act-knowledge-input"> Knowledge Generated?
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>Assign to Communities</label>
+                    <div id="act-community-checklist" class="activity-checklist two-col">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Assign to Indicators</label>
+                    <div id="act-indicator-checklist" class="indicator-checklist">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 10px;">
+                    <button type="button" id="save-activity-btn" class="toggle-btn primary">Save Activity</button>
+                    <button type="button" id="clear-act-form-btn" class="toggle-btn">Clear</button>
+                </div>
+            </div>
+
+            <hr style="margin: 20px 0; border-color: #e2e8f0;">
+
+            <!-- Existing Activities List -->
+            <h4 style="margin-bottom: 12px; color: var(--text-main);">Existing Activities</h4>
+            <div id="manage-activities-list">
+                <!-- Populated by JS -->
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" id="close-manage-activities" class="toggle-btn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Archive Modal -->
+    <div id="archive-modal" class="modal hidden">
+        <div class="modal-content large">
+            <h3>Archive</h3>
+            <p class="form-hint">Manage archived items. You can restore them to active status or delete them permanently.</p>
+            
+            <div class="tabs" style="margin-top: 15px;">
+                <button class="tab-btn-small active" id="archive-tab-comm">Communities</button>
+                <button class="tab-btn-small" id="archive-tab-act">Activities</button>
+            </div>
+
+            <div id="archive-list" style="margin-top: 20px; max-height: 400px; overflow-y: auto;" class="manage-act-list">
+                <!-- Populated by JS -->
+            </div>
+
+            <div class="modal-actions" style="margin-top: 20px;">
+                <button type="button" id="close-archive-modal" class="toggle-btn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manage Knowledge Modal -->
+    <div id="manage-knowledge-modal" class="modal hidden">
+        <div class="modal-content large" style="max-height: 90vh;">
+            <h3 style="color: var(--primary);">Manage Knowledge Hub</h3>
+            <p class="form-hint" style="margin-top: -15px;">Confirm activity-based knowledge or add external resources.</p>
+            
+            <div class="tabs" style="margin-top: 15px;">
+                <button class="tab-btn-small active" id="know-tab-verify">Verify Activities</button>
+                <button class="tab-btn-small" id="know-tab-links">External Links</button>
+            </div>
+
+            <!-- Verify Activities Section -->
+            <div id="know-verify-section" style="margin-top: 20px;">
+                <div id="know-verify-list" class="manage-act-list" style="max-height: 400px; overflow-y: auto;">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- External Links Section -->
+            <div id="know-links-section" class="hidden" style="margin-top: 20px;">
+                <div class="manage-act-add">
+                    <h4 style="margin-bottom: 12px; color: var(--primary);">Add External Link</h4>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Title</label>
+                            <input type="text" id="ext-know-title" placeholder="e.g., National Resilience Report">
+                        </div>
+                        <div class="form-group">
+                            <label>URL</label>
+                            <input type="url" id="ext-know-url" placeholder="https://example.com/report">
+                        </div>
+                    </div>
+                    <button type="button" id="save-ext-know-btn" class="toggle-btn primary" style="margin-top: 10px;">Add Link</button>
+                </div>
+                <div id="ext-know-list" class="manage-act-list" style="margin-top: 20px; max-height: 300px; overflow-y: auto;">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <div class="modal-actions" style="margin-top: 20px;">
+                <button type="button" id="close-knowledge-modal" class="toggle-btn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manage Users Modal -->
+    <div id="manage-users-modal" class="modal hidden">
+        <div class="modal-content large">
+            <h3>Manage Users</h3>
+            <div class="manage-act-add">
+                <h4 style="margin-bottom: 12px; color: var(--primary);">Add User</h4>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" id="user-name-input" placeholder="Enter username...">
+                    </div>
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="password" id="user-pass-input" placeholder="Enter password...">
+                    </div>
+                    <div class="form-group">
+                        <label>Role</label>
+                        <select id="user-role-input">
+                            <option value="Officer">Officer</option>
+                            <option value="KRO">KRO (Admin)</option>
+                        </select>
+                    </div>
+                </div>
+                <button type="button" id="save-user-btn" class="toggle-btn primary">Save User</button>
+            </div>
+            <hr style="margin: 20px 0; border-color: #e2e8f0;">
+            <h4 style="margin-bottom: 12px;">Existing Users</h4>
+            <div id="manage-users-list">
+                <!-- Populated by JS -->
+            </div>
+            <div class="modal-actions">
+                <button type="button" id="close-users-modal" class="toggle-btn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manage Indicators Modal -->
+    <div id="manage-indicators-modal" class="modal hidden">
+        <div class="modal-content large">
+            <h3>Manage Indicators</h3>
+            <div class="manage-act-add">
+                <h4 style="margin-bottom: 12px; color: var(--primary);">Add / Edit Indicator</h4>
+                <input type="hidden" id="ind-edit-id" value="">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Indicator Name</label>
+                        <input type="text" id="ind-name-input" placeholder="e.g., Water Access">
+                    </div>
+                    <div class="form-group">
+                        <label>Capital</label>
+                        <select id="ind-capital-input">
+                            <!-- Capitals from staticData populated by JS -->
+                        </select>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 10px;">
+                    <button type="button" id="save-indicator-btn" class="toggle-btn primary">Save Indicator</button>
+                    <button type="button" id="clear-ind-form-btn" class="toggle-btn">Clear</button>
+                </div>
+            </div>
+            <hr style="margin: 20px 0; border-color: #e2e8f0;">
+            <h4 style="margin-bottom: 12px;">Existing Indicators</h4>
+            <div id="manage-indicators-list" style="max-height: 300px; overflow-y: auto;">
+                <!-- Populated by JS -->
+            </div>
+            <div class="modal-actions">
+                <button type="button" id="close-indicators-modal" class="toggle-btn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Dashboard Modal -->
+    <div id="admin-dashboard-modal" class="modal hidden">
+        <div class="modal-content extra-large">
+            <h3 style="color: var(--primary);">Reach Dashboard</h3>
+            <div class="dashboard-controls" style="display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap;">
+                <select id="dash-filter-country">
+                    <option value="All">All Countries</option>
+                    <option value="Nepal">Nepal</option>
+                    <option value="Bangladesh">Bangladesh</option>
+                </select>
+                <select id="dash-filter-province">
+                    <option value="All">All Provinces</option>
+                </select>
+                <select id="dash-filter-district">
+                    <option value="All">All Districts</option>
+                </select>
+                <select id="dash-filter-community">
+                    <option value="All">All Communities</option>
+                </select>
+                <select id="dash-filter-year">
+                    <option value="All">All Years</option>
+                </select>
+                <select id="dash-filter-quarter" style="width: 100px;">
+                    <option value="All">All Quarters</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                </select>
+                <button type="button" id="dash-refresh-btn" class="toggle-btn-small primary">Refresh</button>
+            </div>
+            
+            <div class="dashboard-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 20px;">
+                <div class="dash-card">
+                    <h4>Total Communities</h4>
+                    <p id="dash-stat-communities" class="dash-stat-value">0</p>
+                </div>
+                <div class="dash-card">
+                    <h4>Avg T0 Resilience</h4>
+                    <p id="dash-stat-t0" class="dash-stat-value">0</p>
+                </div>
+                <div class="dash-card">
+                    <h4>Avg T1 Resilience</h4>
+                    <p id="dash-stat-t1" class="dash-stat-value">0</p>
+                </div>
+            </div>
+            
+            <h4 style="margin-bottom: 12px; color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase;">Aggregate Community Demographics</h4>
+            <div class="dashboard-grid" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; margin-bottom: 20px;">
+                <div class="dash-card">
+                    <h4>Total Population</h4>
+                    <p id="dash-agg-population" class="dash-stat-value" style="font-size: 1.2rem;">0</p>
+                </div>
+                <div class="dash-card">
+                    <h4>Total Male</h4>
+                    <p id="dash-agg-male" class="dash-stat-value" style="font-size: 1.2rem;">0</p>
+                </div>
+                <div class="dash-card">
+                    <h4>Total Female</h4>
+                    <p id="dash-agg-female" class="dash-stat-value" style="font-size: 1.2rem;">0</p>
+                </div>
+                <div class="dash-card">
+                    <h4>Total Children</h4>
+                    <p id="dash-agg-children" class="dash-stat-value" style="font-size: 1.2rem;">0</p>
+                </div>
+                <div class="dash-card">
+                    <h4>Total Elderly</h4>
+                    <p id="dash-agg-elderly" class="dash-stat-value" style="font-size: 1.2rem;">0</p>
+                </div>
+            </div>
+
+            <h4 style="margin-bottom: 12px; color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase;">Beneficiary Reach</h4>
+            <div class="dashboard-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
+                <div class="dash-card">
+                    <h4>Reach (Beneficiaries)</h4>
+                    <div style="height: 300px;">
+                        <canvas id="reach-chart"></canvas>
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <h4>Beneficiary Breakdown</h4>
+                    <div style="height: 300px;">
+                        <canvas id="beneficiary-pie-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-actions" style="margin-top: 20px;">
+                <button type="button" id="close-dashboard-modal" class="toggle-btn">Close Dashboard</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="data.js"></script>
+    <script src="communities.js"></script>
+    <script src="activities.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>
