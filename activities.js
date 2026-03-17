@@ -3,7 +3,7 @@ const activities = [
         id: "act_1",
         name: "Health Post Rehabilitation",
         indicatorIds: ["H01", "F01"],
-        communityIds: ["c_01", "c_01", "c_04", "c_03"],
+        communityIds: ["c_01", "c_02", "c_04", "c_03"],
         knowledgeGenerated: true,
         beneficiaries: { men: 120, women: 150, oldMen: 30, oldWomen: 45, newMen: 90, newWomen: 105 }
     },
