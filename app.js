@@ -16,8 +16,8 @@ let activitiesData = [...activities, ...savedActivities].filter(a => !archivedAc
 let externalKnowledgeLinks = JSON.parse(localStorage.getItem('crmc_external_knowledge') || '[]');
 
 // User Management State
-const defaultUsers = [{ name: 'admin', pass: 'Suchana@2022', role: 'KRO' }];
-let usersData = JSON.parse(localStorage.getItem('crmc_users') || JSON.stringify(defaultUsers));
+const defaultUsers = [{ name: 'admin', pass: '123', role: 'Admin' }];
+let usersData = [...defaultUsers];
 
 // Indicator Management State
 let indicatorsData;
