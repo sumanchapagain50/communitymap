@@ -5,7 +5,7 @@ const activities = [
         indicatorIds: ["H01", "F01"],
         communityIds: ["c_01", "c_02", "c_04", "c_03"],
         knowledgeGenerated: true,
-        beneficiaries: { men: 120, women: 150, oldMen: 30, oldWomen: 45, newMen: 90, newWomen: 105 }
+        beneficiaries: { men: 120, women: 150, oldParticipantMen: 30, oldParticipantWomen: 45, newParticipantMen: 90, newParticipantWomen: 105 }
     },
     {
         id: "act_2",
@@ -13,7 +13,7 @@ const activities = [
         indicatorIds: ["H02", "S01", "S02"],
         communityIds: ["c_11"],
         knowledgeGenerated: false,
-        beneficiaries: { men: 50, women: 60, oldMen: 10, oldWomen: 15, newMen: 40, newWomen: 45 }
+        beneficiaries: { men: 50, women: 60, oldParticipantMen: 10, oldParticipantWomen: 15, newParticipantMen: 40, newParticipantWomen: 45 }
     },
     {
         id: "act_3",
@@ -21,7 +21,7 @@ const activities = [
         indicatorIds: ["N01", "N02"],
         communityIds: ["c_22", "c_31"],
         knowledgeGenerated: true,
-        beneficiaries: { men: 200, women: 180, oldMen: 50, oldWomen: 40, newMen: 150, newWomen: 140 }
+        beneficiaries: { men: 200, women: 180, oldParticipantMen: 50, oldParticipantWomen: 40, newParticipantMen: 150, newParticipantWomen: 140 }
     },
     {
         id: "act_4",
@@ -29,6 +29,6 @@ const activities = [
         indicatorIds: ["F01", "F02", "S01"],
         communityIds: ["comm_1", "comm_2"],
         knowledgeGenerated: false,
-        beneficiaries: { men: 40, women: 300, oldMen: 10, oldWomen: 50, newMen: 30, newWomen: 250 }
+        beneficiaries: { men: 40, women: 300, oldParticipantMen: 10, oldParticipantWomen: 50, newParticipantMen: 30, newParticipantWomen: 250 }
     }
 ];
