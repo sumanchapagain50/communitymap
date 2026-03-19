@@ -185,8 +185,8 @@ function openEditCommunityForm(community) {
     // Pre-fill Demographics
     const d = community.demographics;
     document.getElementById('new-demo-total').value = d.total;
-    document.getElementById('new-demo-male').value = d.male;
-    document.getElementById('new-demo-female').value = d.female;
+    document.getElementById('new-demo-men').value = d.men;
+    document.getElementById('new-demo-women').value = d.women;
     document.getElementById('new-demo-children').value = d.children;
     document.getElementById('new-demo-elderly').value = d.elderly;
     document.getElementById('new-demo-disabilities').value = d.disabilities;
@@ -340,8 +340,8 @@ document.getElementById('add-comm-submit').addEventListener('click', () => {
         t1_score: parseInt(document.getElementById('new-score-t1').value) || 0,
         demographics: {
             total: parseInt(document.getElementById('new-demo-total').value) || 0,
-            male: parseInt(document.getElementById('new-demo-male').value) || 0,
-            female: parseInt(document.getElementById('new-demo-female').value) || 0,
+            men: parseInt(document.getElementById('new-demo-men').value) || 0,
+            women: parseInt(document.getElementById('new-demo-women').value) || 0,
             children: parseInt(document.getElementById('new-demo-children').value) || 0,
             elderly: parseInt(document.getElementById('new-demo-elderly').value) || 0,
             disabilities: parseInt(document.getElementById('new-demo-disabilities').value) || 0,
@@ -691,13 +691,13 @@ function renderDemographics(community, targetId) {
         d = filtered.reduce((acc, curr) => {
             const cd = curr.demographics;
             acc.total += (cd.total || 0);
-            acc.male += (cd.male || 0);
-            acc.female += (cd.female || 0);
+            acc.men += (cd.men || 0);
+            acc.women += (cd.women || 0);
             acc.children += (cd.children || 0);
             acc.elderly += (cd.elderly || 0);
             acc.disabilities += (cd.disabilities || 0);
             return acc;
-        }, { total: 0, male: 0, female: 0, children: 0, elderly: 0, disabilities: 0 });
+        }, { total: 0, men: 0, women: 0, children: 0, elderly: 0, disabilities: 0 });
 
         d.description = `Aggregate data across ${filtered.length} communities in ${currentCountry === "All" ? "all regions" : currentCountry}.`;
         title = `Total Demographics (${currentCountry})`;
@@ -707,8 +707,8 @@ function renderDemographics(community, targetId) {
         <h3 style="margin-bottom: 15px; font-size: 0.9rem; color: var(--primary); text-transform: uppercase; letter-spacing: 0.05em;">${title}</h3>
         <div class="demo-grid">
             <div class="demo-item"><i data-lucide="users"></i> <div><span class="demo-label">Total</span><span class="demo-value">${d.total.toLocaleString()}</span></div></div>
-            <div class="demo-item"><i data-lucide="user"></i> <div><span class="demo-label">Male</span><span class="demo-value">${d.male.toLocaleString()}</span></div></div>
-            <div class="demo-item"><i data-lucide="user-plus"></i> <div><span class="demo-label">Female</span><span class="demo-value">${d.female.toLocaleString()}</span></div></div>
+            <div class="demo-item"><i data-lucide="user"></i> <div><span class="demo-label">men</span><span class="demo-value">${d.men.toLocaleString()}</span></div></div>
+            <div class="demo-item"><i data-lucide="user-plus"></i> <div><span class="demo-label">women</span><span class="demo-value">${d.women.toLocaleString()}</span></div></div>
             <div class="demo-item"><i data-lucide="baby"></i> <div><span class="demo-label">Children</span><span class="demo-value">${d.children.toLocaleString()}</span></div></div>
             <div class="demo-item"><i data-lucide="accessibility"></i> <div><span class="demo-label">Elderly</span><span class="demo-value">${d.elderly.toLocaleString()}</span></div></div>
             <div class="demo-item"><i data-lucide="contact"></i> <div><span class="demo-label">Disabilities</span><span class="demo-value">${d.disabilities.toLocaleString()}</span></div></div>
@@ -1720,19 +1720,19 @@ function updateDashboard() {
     document.getElementById('dash-stat-t1').innerText = avgT1;
 
     // Aggregate Community Demographics
-    const aggDemo = { population: 0, male: 0, female: 0, children: 0, elderly: 0 };
+    const aggDemo = { population: 0, men: 0, women: 0, children: 0, elderly: 0 };
     filteredComms.forEach(c => {
         if (c.demographics) {
             aggDemo.population += (c.demographics.population || 0);
-            aggDemo.male += (c.demographics.male || 0);
-            aggDemo.female += (c.demographics.female || 0);
+            aggDemo.men += (c.demographics.men || 0);
+            aggDemo.women += (c.demographics.women || 0);
             aggDemo.children += (c.demographics.children || 0);
             aggDemo.elderly += (c.demographics.elderly || 0);
         }
     });
     document.getElementById('dash-agg-population').innerText = aggDemo.population.toLocaleString();
-    document.getElementById('dash-agg-male').innerText = aggDemo.male.toLocaleString();
-    document.getElementById('dash-agg-female').innerText = aggDemo.female.toLocaleString();
+    document.getElementById('dash-agg-men').innerText = aggDemo.men.toLocaleString();
+    document.getElementById('dash-agg-women').innerText = aggDemo.women.toLocaleString();
     document.getElementById('dash-agg-children').innerText = aggDemo.children.toLocaleString();
     document.getElementById('dash-agg-elderly').innerText = aggDemo.elderly.toLocaleString();
 
