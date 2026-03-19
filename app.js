@@ -1129,7 +1129,7 @@ function clearActivityForm() {
     document.getElementById('act-year-input').value = '';
     document.getElementById('act-quarter-input').value = 'Q1';
     document.getElementById('act-knowledge-input').checked = false;
-    document.querySelectorAll('.act-ben-men, .act-ben-women, .act-ben-oldMen, .act-ben-oldWomen, .act-ben-newMen, .act-ben-newWomen').forEach(input => input.value = 0);
+    document.querySelectorAll('.act-ben-men, .act-ben-women, .act-ben-oldParticipantMen, .act-ben-oldParticipantWomen, .act-ben-newParticipantMen, .act-ben-newParticipantWomen').forEach(input => input.value = 0);
     document.querySelectorAll('.act-comm-cb, .act-ind-cb').forEach(cb => cb.checked = false);
 }
 
@@ -1149,10 +1149,10 @@ document.getElementById('save-activity-btn').addEventListener('click', () => {
     const ben = {
         men: parseInt(document.getElementById('act-ben-men').value) || 0,
         women: parseInt(document.getElementById('act-ben-women').value) || 0,
-        oldMen: parseInt(document.getElementById('act-ben-oldMen').value) || 0,
-        oldWomen: parseInt(document.getElementById('act-ben-oldWomen').value) || 0,
-        newMen: parseInt(document.getElementById('act-ben-newMen').value) || 0,
-        newWomen: parseInt(document.getElementById('act-ben-newWomen').value) || 0
+        oldParticipantMen: parseInt(document.getElementById('act-ben-oldParticipantMen').value) || 0,
+        oldParticipantWomen: parseInt(document.getElementById('act-ben-oldParticipantWomen').value) || 0,
+        newParticipantMen: parseInt(document.getElementById('act-ben-newParticipantMen').value) || 0,
+        newParticipantWomen: parseInt(document.getElementById('act-ben-newParticipantWomen').value) || 0
     };
 
     const editId = document.getElementById('act-edit-id').value;
@@ -1737,7 +1737,7 @@ function updateDashboard() {
     document.getElementById('dash-agg-elderly').innerText = aggDemo.elderly.toLocaleString();
 
     // Beneficiary Aggregation (only from activities matching filters)
-    const totals = { men: 0, women: 0, oldMen: 0, oldWomen: 0, newMen: 0, newWomen: 0 };
+    const totals = { men: 0, women: 0, oldParticipantMen: 0, oldParticipantWomen: 0, newParticipantMen: 0, newParticipantWomen: 0 };
     activitiesData.forEach(act => {
         // Filter by year/quarter if specified
         if (year !== 'All' && year !== '' && act.year !== year) return;
@@ -1764,10 +1764,10 @@ function renderCharts(totals) {
     reachChart = new Chart(ctxBar, {
         type: 'bar',
         data: {
-            labels: ['Men', 'Women', 'Old Men', 'Old Women', 'New Men', 'New Women'],
+            labels: ['Men', 'Women', 'Men (Old Participant)', 'Women (Old Participant)', 'Men (New Participant)', 'Women (New Participant)'],
             datasets: [{
                 label: 'Total Reach',
-                data: [totals.men, totals.women, totals.oldMen, totals.oldWomen, totals.newMen, totals.newWomen],
+                data: [totals.men, totals.women, totals.oldParticipantMen, totals.oldParticipantWomen, totals.newParticipantMen, totals.newParticipantWomen],
                 backgroundColor: ['#3b82f6', '#ec4899', '#6366f1', '#f43f5e', '#10b981', '#f59e0b']
             }]
         },
@@ -1779,7 +1779,7 @@ function renderCharts(totals) {
         data: {
             labels: ['Men', 'Women'],
             datasets: [{
-                data: [totals.men + totals.oldMen + totals.newMen, totals.women + totals.oldWomen + totals.newWomen],
+                data: [totals.men + totals.oldParticipantMen + totals.newParticipantMen, totals.women + totals.oldParticipantWomen + totals.newParticipantWomen],
                 backgroundColor: ['#3b82f6', '#ec4899']
             }]
         },
