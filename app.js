@@ -422,6 +422,12 @@ function finishInit() {
     if (allScoresCountrySelect) {
         allScoresCountrySelect.addEventListener('change', renderAllScoresGrid);
     }
+    
+    // Wire up All Scores Checkboxes dynamically
+    const allScoresT0 = document.getElementById('all-scores-t0-check');
+    const allScoresT1 = document.getElementById('all-scores-t1-check');
+    if (allScoresT0) allScoresT0.addEventListener('change', renderAllScoresGrid);
+    if (allScoresT1) allScoresT1.addEventListener('change', renderAllScoresGrid);
 
     // Quick Activities Button
     const quickActsBtn = document.getElementById('quick-activities-btn');
@@ -908,6 +914,9 @@ function populateAllScoresCountrySelect() {
 
 function renderAllScoresGrid() {
     const selectedCountry = allScoresCountrySelect.value;
+    const showT0 = document.getElementById('all-scores-t0-check')?.checked ?? true;
+    const showT1 = document.getElementById('all-scores-t1-check')?.checked ?? false;
+    
     allScoresGrid.innerHTML = '';
     
     const filtered = selectedCountry === 'All' 
@@ -915,23 +924,30 @@ function renderAllScoresGrid() {
         : communitiesData.filter(c => c.country === selectedCountry);
 
     filtered.forEach(comm => {
+        const t0val = comm.t0_score || 0;
+        const t1val = comm.t1_score;
+
         const card = document.createElement('div');
         card.className = 'score-card';
         card.innerHTML = `
             <h3>${comm.name}</h3>
+            ${!showT0 && !showT1 ? '<p style="text-align:center; padding: 20px 0; color: #94a3b8;">No data selected</p>' : `
             <div class="score-card-gauge-wrapper">
                 <canvas id="gauge-combined-${comm.id}" class="score-card-canvas-large" width="180" height="100"></canvas>
                 <div class="score-card-legend">
-                    <span style="color:#94a3b8">● T0: ${comm.t0_score || 0}</span>
-                    <span style="color:#2563eb">● T1: ${comm.t1_score || 'N/A'}</span>
+                    ${showT0 ? `<span style="color:#94a3b8">● T0: ${t0val}</span>` : ''}
+                    ${showT1 ? `<span style="color:#2563eb">● T1: ${t1val || 'N/A'}</span>` : ''}
                 </div>
             </div>
+            `}
         `;
         allScoresGrid.appendChild(card);
         
-        setTimeout(() => {
-            drawCombinedGauge(`gauge-combined-${comm.id}`, comm.t0_score || 0, comm.t1_score);
-        }, 0);
+        if (showT0 || showT1) {
+            setTimeout(() => {
+                drawCombinedGauge(`gauge-combined-${comm.id}`, showT0 ? t0val : null, showT1 ? t1val : null);
+            }, 0);
+        }
     });
 }
 
@@ -948,8 +964,10 @@ function drawCombinedGauge(canvasId, t0, t1) {
     ctx.arc(cx, cy, r, Math.PI, 0);
     ctx.lineWidth = 15; ctx.strokeStyle = '#f1f5f9'; ctx.stroke();
 
-    // T0 Needle (Gray)
-    drawNeedle(ctx, cx, cy, r - 8, (t0 / 100) * Math.PI, '#94a3b8');
+    // T0 Needle (Gray) - only if t0 is not null
+    if (t0 !== null && t0 !== undefined) {
+        drawNeedle(ctx, cx, cy, r - 8, (t0 / 100) * Math.PI, '#94a3b8');
+    }
     
     // T1 Needle (Blue) - only if t1 is not null/undefined
     if (t1 !== null && t1 !== undefined && t1 !== "") {
@@ -2634,6 +2652,7 @@ document.getElementById('cancel-map-click-btn')?.addEventListener('click', () =>
 });
 
 // ===== INTERVENTION MANAGEMENT =====
+let interventionMarkers = {}; // Global dictionary to reference marker objects
 
 function renderInterventionMarkers() {
     if (!interventionsGroup) return;
@@ -2661,6 +2680,8 @@ function renderInterventionMarkers() {
         'Other': '#6b7280'
     };
 
+    interventionMarkers = {}; // Clear old dictionary
+    
     filtered.forEach(intervention => {
         if (!intervention.coords || isNaN(intervention.coords[0])) return;
         const color = (intervention.category && categoryColors[intervention.category]) ? categoryColors[intervention.category] : '#d97706';
@@ -2675,11 +2696,26 @@ function renderInterventionMarkers() {
         });
 
         const marker = L.marker(intervention.coords, { icon });
-        const catBadge = intervention.category ? `<span style="font-size:0.72rem;background:${color};color:white;padding:2px 7px;border-radius:20px;">${intervention.category}</span>` : '';
+        const catBadge = intervention.category ? `<span style="font-size:0.72rem;background:${color};color:white;padding:2px 7px;border-radius:20px;display:inline-block;margin-bottom:8px;">${intervention.category}</span>` : '';
         
-        marker.on('click', () => {
-            showInterventionSidebar(intervention, catBadge);
-            
+        const popupContent = `
+            <div style="font-family: 'Inter', sans-serif; min-width: 200px; padding-right: 5px;">
+                <h4 style="margin: 0 0 5px 0; color: var(--primary); font-size: 1rem;">${intervention.name}</h4>
+                ${catBadge}
+                <div style="font-size: 0.85rem; color: var(--text-muted); max-height: 150px; overflow-y: auto; line-height: 1.4;">
+                    ${intervention.description ? intervention.description.replace(/\n/g, '<br>') : '<em>No summary available.</em>'}
+                </div>
+                ${isAdmin ? `
+                <div style="margin-top: 15px; border-top: 1px solid #e2e8f0; padding-top: 10px;">
+                    <button class="toggle-btn-small" onclick="editInterventionInModal('${intervention.id}')" style="width:100%; margin:0;">✏️ Edit</button>
+                </div>
+                ` : ''}
+            </div>
+        `;
+        
+        marker.bindPopup(popupContent, { offset: [0, -35] });
+        
+        marker.on('click', () => {           
             interventionsGroup.eachLayer(layer => {
                 const el = layer.getElement();
                 if (el) el.classList.remove('leaflet-marker-highlighted');
@@ -2689,51 +2725,93 @@ function renderInterventionMarkers() {
         });
         
         interventionsGroup.addLayer(marker);
+        interventionMarkers[intervention.id] = marker; // Store mapping
     });
 
     const validCoords = filtered.filter(i => i.coords && !isNaN(i.coords[0])).map(i => i.coords);
     if (validCoords.length > 0) {
         map.flyToBounds(L.latLngBounds(validCoords), { padding: [50, 50], maxZoom: 12, animate: true, duration: 1.5 });
     }
+    
+    // Inject all valid interventions into the interactive sidebar list
+    renderInterventionSidebarList(filtered);
 }
 
-function showInterventionSidebar(intervention, catBadge) {
+function renderInterventionSidebarList(interventions) {
     const colInt = document.getElementById('col-intervention');
     if (!colInt) return;
 
-    let adminHtml = '';
-    if (isAdmin) {
-        adminHtml = `
-            <div style="margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 15px; display: flex; gap: 8px;">
-                <button class="toggle-btn-small" onclick="editInterventionInModal('${intervention.id}')">Edit Intervention</button>
-            </div>
-        `;
+    if (interventions.length === 0) {
+        colInt.innerHTML = '<div style="padding: 20px; color: var(--text-muted); text-align: center; margin-top: 50px;">No interventions found in this area.</div>';
+        return;
     }
 
-    colInt.innerHTML = `
-        <div class="column-info">
-            <div style="display:flex; align-items:center; gap:8px; margin-bottom: 12px;">
-                <h2 style="margin:0;">📍 ${intervention.name}</h2>
-            </div>
-            ${catBadge || '<span style="font-size:0.72rem;background:#64748b;color:white;padding:2px 7px;border-radius:20px;">Uncategorized</span>'}
+    // Ensure main column uses flex logic
+    colInt.style.display = 'flex';
+    colInt.style.flexDirection = 'column';
+    colInt.style.overflow = 'hidden';
+
+    let listHtml = `
+        <div class="column-info" style="padding: 20px 20px 10px 20px; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; background: white;">
+            <h2 style="margin:0; color: var(--primary);">Interventions (${interventions.length})</h2>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 5px; line-height: 1.3;">Select an intervention to locate it on the map.</p>
         </div>
-        <div class="scroll-area" style="padding: 20px;">
-            <div class="info-card">
-                <h3 style="font-size: 0.9rem; color: var(--primary); margin-bottom: 8px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;">Details</h3>
-                <p style="font-size: 0.9rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 15px;">
-                    ${intervention.description ? intervention.description.replace(/\n/g, '<br>') : '<em>No description provided.</em>'}
-                </p>
-                <div style="font-size: 0.8rem; color: #64748b; background: #f8fafc; padding: 10px; border-radius: 6px;">
-                    <strong>Coordinates:</strong> ${intervention.coords[0].toFixed(5)}, ${intervention.coords[1].toFixed(5)}
+        <div style="flex: 1; overflow-y: auto; padding: 15px 15px 15px 15px; background: #f8fafc;">
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+    `;
+
+    const categoryColors = {
+        'Flood Management': '#3b82f6',
+        'Heatwave Response': '#ef4444',
+        'Community Training': '#10b981',
+        'Infrastructure': '#8b5cf6',
+        'Early Warning': '#f59e0b',
+        'Livelihood Support': '#06b6d4',
+        'Other': '#6b7280'
+    };
+
+    interventions.forEach(inter => {
+        const catColor = (inter.category && categoryColors[inter.category]) ? categoryColors[inter.category] : '#d97706';
+        
+        listHtml += `
+            <div class="dash-card sidebar-list-card" style="cursor: pointer; padding: 14px; background: white; border-radius: 12px; transition: transform 0.2s, box-shadow 0.2s;" onclick="zoomToIntervention('${inter.id}')" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 16px rgba(0,0,0,0.06)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 6px rgba(0,0,0,0.04)'">
+                <div style="margin-bottom: 8px;">
+                    <h4 style="margin: 0; color: var(--text-main); font-size: 0.95rem;">${inter.name}</h4>
+                </div>
+                ${inter.category ? `<span style="font-size:0.7rem;background:${catColor};color:white;padding:3px 8px;border-radius:12px;font-weight:600;">${inter.category}</span>` : ''}
+                <div style="font-size: 0.75rem; color: #64748b; margin-top: 10px;">
+                    <i data-lucide="map-pin" style="width: 12px; height: 12px; vertical-align: middle;"></i> 
+                    ${inter.coords ? `${inter.coords[0].toFixed(3)}, ${inter.coords[1].toFixed(3)}` : 'No valid coordinates'}
                 </div>
             </div>
-            ${adminHtml}
+        `;
+    });
+
+    listHtml += `
+            </div>
         </div>
     `;
-    
-    sidebar.classList.remove('hidden');
-    sidebar.classList.add('active');
+
+    colInt.innerHTML = listHtml;
+    if (window.lucide) window.lucide.createIcons();
 }
+
+window.zoomToIntervention = function(id) {
+    const inter = interventionsData.find(i => i.id === id);
+    if (!inter || !inter.coords) return;
+    
+    // Zoom and pan smoothly to the exact coordinates
+    map.flyTo(inter.coords, 14, { animate: true, duration: 1.5 });
+    
+    // Open the associated Map Popup directly
+    if (interventionMarkers[id]) {
+        setTimeout(() => {
+            interventionMarkers[id].openPopup();
+        }, 300); // slight delay so map adjusts before drawing the bubble
+    }
+};
+
+// Function showInterventionSidebar was removed as Leaflet tooltips are now used natively.
 
 function clearInterventionForm() {
     document.getElementById('intervention-edit-id').value = '';
@@ -2913,7 +2991,6 @@ function openInterventionMapView() {
     const colInt = document.getElementById('col-intervention');
     if (colInt) {
         colInt.classList.remove('hidden');
-        colInt.innerHTML = '<div style="padding: 20px; color: var(--text-muted); text-align: center; margin-top: 50px;">Select an intervention on the map to view its details.</div>';
     }
 
     showBtn.classList.add('hidden');
@@ -2939,6 +3016,21 @@ function closeInterventionMapView() {
     const countryName = document.getElementById('country-select').value;
     onCountrySelection(countryName, false);
 }
+
+// Universal handler for modal close buttons
+document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.modal-close-x');
+    if (btn) {
+        const modal = btn.closest('.modal');
+        if (modal) modal.classList.add('hidden');
+    }
+    
+    // Close Quick Actions dropdown when any item is clicked
+    if (e.target.closest('.dropdown-item')) {
+        const dropdown = e.target.closest('.admin-dropdown');
+        if (dropdown) dropdown.classList.remove('show');
+    }
+});
 
 // Start initialization
 initData();
