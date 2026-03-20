@@ -45,29 +45,225 @@ html {
     transition: transform 0.4s cubic-bezier(0.19, 1, 0.22, 1), width 0.4s cubic-bezier(0.19, 1, 0.22, 1);
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow: visible; /* To allow icons to overlap if needed */
 }
 
+/* Sidebar Toggle Icons */
+.sidebar-collapse-icon {
+    position: absolute;
+    top: 15px;
+    left: -15px;
+    width: 30px;
+    height: 30px;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    z-index: 1001;
+    color: var(--primary);
+    transition: transform 0.3s;
+}
+
+.sidebar-collapse-icon:hover { transform: scale(1.1); }
+
+.sidebar-toggle-btn {
+    position: fixed;
+    top: 35px;
+    right: 20px;
+    width: 40px;
+    height: 40px;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: var(--shadow);
+    z-index: 999;
+    color: var(--primary);
+}
 
 .sidebar.hidden {
     transform: translateX(calc(100% + 40px));
 }
 
 .sidebar-header {
-    padding: 16px 24px;
+    padding: 12px 20px;
     background: rgba(255, 255, 255, 0.5);
     border-bottom: 1px solid rgba(0, 0, 0, 0.05);
 }
 
-.header-controls {
+/* Admin Dropdown Styling */
+.admin-dropdown {
+    position: relative;
+    display: inline-block;
+}
+
+/* Floating Map Buttons */
+.floating-map-btn {
+    position: fixed;
+    top: 25px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1100;
+    padding: 10px 24px;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 50px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15);
+    color: var(--text-main);
+    font-weight: 700;
+    font-size: 0.95rem;
     display: flex;
+    align-items: center;
     gap: 8px;
-    flex-wrap: wrap;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.floating-map-btn:hover {
+    transform: translateX(-50%) translateY(-2px);
+    box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.2);
+    background: white;
+}
+
+.floating-map-btn i {
+    width: 18px;
+    height: 18px;
+}
+
+.floating-map-btn.hidden {
+    display: none !important;
+}
+
+/* Activity Target & Participants Styling */
+.activity-target-wrapper {
+    max-height: 450px;
+    overflow-y: auto;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #f8fafc;
+    padding: 10px;
+}
+
+.target-entity-card {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 8px;
+    transition: all 0.2s;
+}
+
+.target-entity-card:hover {
+    border-color: var(--primary);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+.entity-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+}
+
+.entity-header input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--primary);
+}
+
+.entity-name {
+    font-weight: 600;
+    color: var(--text-main);
+    flex: 1;
+}
+
+.participant-inputs {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px dashed #e2e8f0;
+}
+
+.participant-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+.participant-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.participant-field label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.participant-field input {
+    padding: 6px 10px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    width: 100%;
+}
+
+.target-entity-card.selected {
+    border-left: 4px solid var(--primary);
+    background: #eff6ff;
+}
+
+.dropdown-content {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    background: white;
+    min-width: 220px;
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    padding: 8px;
+    z-index: 1000;
+    border: 1px solid #e2e8f0;
+}
+
+.admin-dropdown.show .dropdown-content {
+    display: block;
+}
+
+.dropdown-item {
+    width: 100%;
+    padding: 10px 16px;
+    text-align: left;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--text-main);
+    display: block;
+}
+
+.dropdown-item:hover {
+    background: #f1f5f9;
+    color: var(--primary);
+}
+
+.dropdown-item.danger {
+    color: var(--danger);
+    border-top: 1px solid #eee;
 }
 
 .header-controls .toggle-btn {
     width: auto;
-    flex: 1 1 auto;
+    flex: 0 0 auto;
     font-size: 0.8rem;
     padding: 6px 12px;
     margin-bottom: 0;
@@ -91,7 +287,7 @@ html {
 }
 
 .column-info {
-    padding: 20px 24px;
+    padding: 12px 20px;
 }
 
 .toggle-btn {
@@ -105,6 +301,10 @@ html {
     cursor: pointer;
     font-weight: 600;
     transition: 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
 }
 
 .toggle-btn:hover {
@@ -112,17 +312,7 @@ html {
 }
 
 .sidebar-toggle-fixed {
-    position: fixed;
-    top: 70px;
-    right: 10px;
-    z-index: 1001;
-    padding: 12px 20px;
-    background: white;
-    border-radius: 12px;
-    box-shadow: var(--shadow);
-    cursor: pointer;
-    font-weight: 700;
-    border: 1px solid #ddd;
+    display: none; /* Replaced by sidebar-toggle-btn */
 }
 
 .country-zoom {
@@ -353,7 +543,7 @@ h2 {
 }
 
 .capital-header {
-    padding: 16px;
+    padding: 10px 16px;
     cursor: pointer;
     display: flex;
     justify-content: space-between;
@@ -365,19 +555,19 @@ h2 {
 
 .indicators-list {
     display: none;
-    padding: 10px;
+    padding: 6px;
     background: rgba(255, 255, 255, 0.5);
 }
 
 .indicator-item {
-    padding: 12px;
+    padding: 8px 12px;
     background: white;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
     border-radius: 8px;
     display: flex;
     flex-direction: column;
     cursor: pointer;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .indicator-header {

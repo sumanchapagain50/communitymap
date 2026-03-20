@@ -15,32 +15,51 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- PapaParse for CSV -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <!-- JSZip for ZIP compression -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 
 <body>
     <div id="map"></div>
+    <button id="close-inter-map-btn" class="floating-map-btn hidden">
+        <i data-lucide="x"></i> Close Intervention Map
+    </button>
 
-    <button id="show-sidebar-btn" class="sidebar-toggle-fixed hidden">Show Sidebar</button>
-
-    <!-- Integrated Sidebar -->
+    <button id="show-sidebar-btn" class="sidebar-toggle-btn hidden" title="Show Sidebar">
+        <i data-lucide="chevron-left"></i>
+    </button>
+<!-- Integrated Sidebar -->
     <div id="sidebar" class="sidebar active">
+        <button id="hide-sidebar-btn" class="sidebar-collapse-icon" title="Hide Sidebar">
+            <i data-lucide="chevron-right"></i>
+        </button>
+
         <div class="sidebar-header">
             <div class="header-controls">
-                <button id="toggle-sidebar" class="toggle-btn">Hide Sidebar</button>
+                <!-- Admin Actions Dropdown -->
+                <div id="admin-actions-div" class="admin-dropdown hidden">
+                    <button id="admin-actions-btn" class="toggle-btn dropdown-trigger">
+                        Admin Actions <i data-lucide="chevron-down"></i>
+                    </button>
+                    <div class="dropdown-content">
+                        <button id="manage-communities-btn" class="dropdown-item">Manage Communities</button>
+                        <button id="manage-activities-btn" class="dropdown-item">Manage Activities</button>
+                        <button id="manage-users-btn" class="dropdown-item">Manage Users</button>
+                        <button id="manage-indicators-btn" class="dropdown-item">Manage Indicators</button>
+                        <button id="manage-knowledge-btn" class="dropdown-item">Manage Knowledge</button>
+                        <button id="manage-countries-btn" class="dropdown-item">Manage Countries</button>
+                        <button id="manage-interventions-btn" class="dropdown-item" style="color: #d97706;">📍 Interventions</button>
+                        <button id="archived-communities-btn" class="dropdown-item">Archive</button>
+                        <button id="kro-dashboard-btn" class="dropdown-item">Reach Dashboard</button>
+                        <button id="export-data-btn" class="dropdown-item">Export Data (CSV)</button>
+                        <button id="export-zip-btn" class="dropdown-item">Export Complete Package (ZIP)</button>
+                        <button id="import-data-btn" class="dropdown-item">Import Data</button>
+                        <button id="admin-logout-btn" class="dropdown-item danger">Logout</button>
+                    </div>
+                </div>
+
                 <button id="admin-login-btn" class="toggle-btn">Admin Login</button>
-                <button id="manage-communities-btn" class="toggle-btn hidden">Manage Communities</button>
-                <button id="manage-activities-btn" class="toggle-btn hidden">Manage Activities</button>
-                <button id="manage-users-btn" class="toggle-btn hidden">Manage Users</button>
-                <button id="manage-indicators-btn" class="toggle-btn hidden">Manage Indicators</button>
-                <button id="manage-knowledge-btn" class="toggle-btn hidden">Manage Knowledge</button>
-                <button id="manage-countries-btn" class="toggle-btn hidden">Manage Countries</button>
-                <button id="manage-interventions-btn" class="toggle-btn hidden" style="background: linear-gradient(135deg, #f59e0b, #d97706); color: white; border-color: #d97706;">📍 Interventions</button>
-                <button id="archived-communities-btn" class="toggle-btn hidden">Archive</button>
-                <button id="kro-dashboard-btn" class="toggle-btn hidden">Reach Dashboard</button>
-                <button id="export-data-btn" class="toggle-btn hidden">Export Data</button>
-                <button id="import-data-btn" class="toggle-btn hidden">Import Data</button>
                 <input type="file" id="import-data-file" accept=".csv" multiple style="display:none;">
-                <button id="admin-logout-btn" class="toggle-btn danger hidden">Logout</button>
             </div>
         </div>
 
@@ -63,7 +82,7 @@
                 </div>
 
                 <div class="tabs">
-                    <button class="tab-btn active" data-tab="score" data-col="main">Resilience</button>
+                    <button class="tab-btn active" data-tab="score" data-col="main">CRMC Grading</button>
                     <button class="tab-btn" data-tab="demographics" data-col="main">Demographics</button>
                     <button class="tab-btn" data-tab="activities" data-col="main">Activities</button>
                     <button class="tab-btn" data-tab="knowledge" data-col="main">Knowledge</button>
@@ -147,7 +166,7 @@
             <div class="form-tabs">
                 <button class="form-tab-btn active" data-form-tab="basics">1. Basics</button>
                 <button class="form-tab-btn" data-form-tab="demo">2. Demographics</button>
-                <button class="form-tab-btn" data-form-tab="resilience">3. Resilience</button>
+                <button class="form-tab-btn" data-form-tab="resilience">3. CRMC Grading</button>
                 <button class="form-tab-btn" data-form-tab="grading">4. Grading</button>
                 <button class="form-tab-btn" data-form-tab="comm-activities">5. Activities</button>
             </div>
@@ -164,18 +183,22 @@
                             <input type="text" id="new-comm-name" placeholder="e.g., Kathmandu" required>
                         </div>
                         <div class="form-group">
-                            <label>Country</label>
-                            <select id="new-comm-country" required>
-                                <option value="Nepal">Nepal</option>
-                              </select>
+                            <label>Municipality</label>
+                            <input type="text" id="new-comm-municipality" placeholder="e.g., Sindhupalchok Municipality">
+                        </div>
+                        <div class="form-group">
+                            <label>District</label>
+                            <input type="text" id="new-comm-district" placeholder="e.g., Sindhupalchok">
                         </div>
                         <div class="form-group">
                             <label>Province</label>
                             <input type="text" id="new-comm-province" placeholder="e.g., Bagmati">
                         </div>
                         <div class="form-group">
-                            <label>District</label>
-                            <input type="text" id="new-comm-district" placeholder="e.g., Sindhupalchok">
+                            <label>Country</label>
+                            <select id="new-comm-country" required>
+                                <option value="Nepal">Nepal</option>
+                              </select>
                         </div>
                         <div class="form-group">
                             <label>Coordinates (Lat, Lng) — click map or type</label>
@@ -251,12 +274,10 @@
                         <div class="form-group">
                             <label>Beneficiaries (Optional)</label>
                             <div class="form-grid-three">
-                                <div><small>Men</small><input type="number" id="inline-ben-men" value="0"></div>
-                                <div><small>Women</small><input type="number" id="inline-ben-women" value="0"></div>
-                                <div><small>Old Men</small><input type="number" id="inline-ben-oldMen" value="0"></div>
-                                <div><small>Old Women</small><input type="number" id="inline-ben-oldWomen" value="0"></div>
-                                <div><small>New Men</small><input type="number" id="inline-ben-newMen" value="0"></div>
-                                <div><small>New Women</small><input type="number" id="inline-ben-newWomen" value="0"></div>
+                                <div><small>Men (Old Participants)</small><input type="number" id="inline-ben-men" value="0"></div>
+                                <div><small>Women (Old Participants)</small><input type="number" id="inline-ben-women" value="0"></div>
+                                <div><small>Men (New Participants)</small><input type="number" id="inline-ben-newMen" value="0"></div>
+                                <div><small>Women (New Participants)</small><input type="number" id="inline-ben-newWomen" value="0"></div>
                             </div>
                         </div>
                         <div class="form-group">
@@ -330,16 +351,22 @@
                             <option value="4">4</option>
                         </select>
                     </div>
+                    <div class="form-group">
+                        <label>Activity Level</label>
+                        <select id="act-level-select">
+                            <option value="community">Community</option>
+                            <option value="municipality">Municipality</option>
+                            <option value="district">District</option>
+                            <option value="province">Province</option>
+                            <option value="country">Country</option>
+                        </select>
+                    </div>
                 </div>
-                <div class="form-group" style="margin-top: 10px;">
-                    <label>Beneficiaries</label>
-                    <div class="form-grid-three">
-                        <div><small>Men</small><input type="number" id="act-ben-men" value="0"></div>
-                        <div><small>Women</small><input type="number" id="act-ben-women" value="0"></div>
-                        <div><small>Old Men</small><input type="number" id="act-ben-oldMen" value="0"></div>
-                        <div><small>Old Women</small><input type="number" id="act-ben-oldWomen" value="0"></div>
-                        <div><small>New Men</small><input type="number" id="act-ben-newMen" value="0"></div>
-                        <div><small>New Women</small><input type="number" id="act-ben-newWomen" value="0"></div>
+                <div class="form-group" style="margin-top: 15px;">
+                    <label id="act-target-label">Targeted Communities & Participants</label>
+                    <div id="act-target-wrapper" class="activity-target-wrapper">
+                        <!-- Dynamic list of entities with participant inputs will appear here -->
+                        <p class="form-hint" style="padding:10px;">Select a level and targets to enter participant data.</p>
                     </div>
                 </div>
                 <div class="form-group" style="margin-top: 10px;">
@@ -347,10 +374,10 @@
                         <input type="checkbox" id="act-knowledge-input"> Knowledge Generated?
                     </label>
                 </div>
-                <div class="form-group">
+                <div class="form-group hidden" style="display:none;">
                     <label>Assign to Communities</label>
                     <div id="act-community-checklist" class="activity-checklist two-col">
-                        <!-- Populated by JS -->
+                        <!-- Kept for legacy/background compatibility but hidden -->
                     </div>
                 </div>
                 <div class="form-group">
@@ -617,6 +644,9 @@
                 <select id="dash-filter-district">
                     <option value="All">All Districts</option>
                 </select>
+                <select id="dash-filter-municipality">
+                    <option value="All">All Municipalities</option>
+                </select>
                 <select id="dash-filter-community">
                     <option value="All">All Communities</option>
                 </select>
@@ -639,11 +669,11 @@
                     <p id="dash-stat-communities" class="dash-stat-value">0</p>
                 </div>
                 <div class="dash-card">
-                    <h4>Avg T0 Resilience</h4>
+                    <h4>Avg T0 CRMC Grading</h4>
                     <p id="dash-stat-t0" class="dash-stat-value">0</p>
                 </div>
                 <div class="dash-card">
-                    <h4>Avg T1 Resilience</h4>
+                    <h4>Avg T1 CRMC Grading</h4>
                     <p id="dash-stat-t1" class="dash-stat-value">0</p>
                 </div>
             </div>
@@ -713,7 +743,10 @@
         <div class="modal-content large" style="max-height: 90vh;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                 <h3 style="color: #d97706; margin: 0;">📍 Manage Interventions</h3>
-                <button id="show-add-intervention-btn" class="toggle-btn-small primary">+ Add New Intervention</button>
+                <div style="display: flex; gap: 8px;">
+                    <button id="view-intervention-map-btn" class="toggle-btn-small primary" style="background: #d97706; border-color: #b45309;">Intervention Map</button>
+                    <button id="show-add-intervention-btn" class="toggle-btn-small primary">+ Add New Intervention</button>
+                </div>
             </div>
             <p class="form-hint" style="margin-top: -10px;">Manually place intervention markers on the map with a name, coordinates, and description.</p>
 

@@ -4,6 +4,8 @@ let currentUserRole = null;
 
 let communitiesData = [];
 let activitiesData = [];
+let allCommunitiesRaw = [];
+let allActivitiesRaw = [];
 
 // Load stored/archived IDs
 const archivedCommunityIds = JSON.parse(localStorage.getItem('archived_communities_v2') || '[]');
@@ -39,13 +41,15 @@ async function initData() {
                     });
                     // Add any locally-added communities that are NOT in CSV at all
                     savedComms.forEach(c => { if (!resolvedMap.has(c.id)) resolvedMap.set(c.id, c); });
-                    communitiesData = Array.from(resolvedMap.values()).filter(c => !archivedCommunityIds.includes(c.id));
+                    allCommunitiesRaw = Array.from(resolvedMap.values());
+                    communitiesData = allCommunitiesRaw.filter(c => !archivedCommunityIds.includes(c.id));
                 } else {
                     // No conflicts — merge normally (CSV wins for shared IDs on a clean load,
                     // but saved-only entries are preserved)
                     const csvMap = new Map(csvComms.map(c => [c.id, c]));
                     savedComms.forEach(c => { if (!csvMap.has(c.id)) csvMap.set(c.id, c); });
-                    communitiesData = Array.from(csvMap.values()).filter(c => !archivedCommunityIds.includes(c.id));
+                    allCommunitiesRaw = Array.from(csvMap.values());
+                    communitiesData = allCommunitiesRaw.filter(c => !archivedCommunityIds.includes(c.id));
                 }
             }
         } else {
@@ -65,6 +69,13 @@ async function initData() {
             if (parsed.data) {
                 const acts = parsed.data.map(row => mapCSVToActivity(row));
                 const savedActs = JSON.parse(localStorage.getItem('added_activities_v2') || '[]');
+                
+                // Keep raw for archive
+                const actMap = new Map();
+                acts.forEach(i => actMap.set(i.id, i));
+                savedActs.forEach(i => actMap.set(i.id, i));
+                allActivitiesRaw = Array.from(actMap.values());
+                
                 activitiesData = deduplicateById(acts, savedActs, archivedActivityIds);
             }
         }
@@ -84,6 +95,7 @@ function mapCSVToCommunity(row) {
         country: row.Country,
         province: row.Province,
         district: row.District,
+        municipality: row.Municipality || "",
         coords: [parseFloat(row.Lat), parseFloat(row.Lng)],
         t0_score: parseFloat(row.T0_Score) || 0,
         t1_score: parseFloat(row.T1_Score) || 0,
@@ -127,7 +139,11 @@ function mapCSVToActivity(row) {
             oldWomen: parseInt(row.OldWomen) || 0,
             newMen: parseInt(row.NewMen) || 0,
             newWomen: parseInt(row.NewWomen) || 0
-        }
+        },
+        municipality: row.Municipality || "",
+        district: row.District || "",
+        province: row.Province || "",
+        country: row.Country || ""
     };
 }
 
@@ -259,7 +275,7 @@ let loginBtn, logoutBtn, manageActivitiesBtn, archivedCommunitiesBtn, loginModal
 function setupUIHandles() {
     sidebar = document.getElementById('sidebar');
     showBtn = document.getElementById('show-sidebar-btn');
-    hideBtn = document.getElementById('toggle-sidebar');
+    hideBtn = document.getElementById('hide-sidebar-btn');
 
     loginBtn = document.getElementById('admin-login-btn');
     logoutBtn = document.getElementById('admin-logout-btn');
@@ -332,6 +348,9 @@ function finishInit() {
     initTabs();
     setupMapListeners();
     setupIndicatorFilterListeners();
+
+    autoLoginAsAdmin();
+    
     // Community Select listener
     communitySelect.addEventListener('change', (e) => {
         const id = e.target.value;
@@ -529,6 +548,9 @@ function openEditCommunityForm(community) {
 
     // Pre-fill Basics
     document.getElementById('new-comm-name').value = community.name;
+    document.getElementById('new-comm-municipality').value = community.municipality || '';
+    document.getElementById('new-comm-district').value = community.district || '';
+    document.getElementById('new-comm-province').value = community.province || '';
     document.getElementById('new-comm-country').value = community.country;
     document.getElementById('new-comm-coords').value = community.coords.join(', ');
 
@@ -657,6 +679,7 @@ document.getElementById('delete-comm-btn').addEventListener('click', () => {
 
 document.getElementById('add-comm-submit').addEventListener('click', () => {
     const name = document.getElementById('new-comm-name').value.trim();
+    const municipality = document.getElementById('new-comm-municipality').value.trim();
     if (!name) return alert('Please enter a community name.');
 
     const coordsStr = document.getElementById('new-comm-coords').value.trim();
@@ -688,7 +711,10 @@ document.getElementById('add-comm-submit').addEventListener('click', () => {
 
     const commData = {
         id: isEdit ? editId : 'comm_' + Date.now(),
-        name: name,
+        name,
+        municipality,
+        district: document.getElementById('new-comm-district').value,
+        province: document.getElementById('new-comm-province').value,
         country: document.getElementById('new-comm-country').value,
         coords: [lat, lng],
         t0_score: parseInt(document.getElementById('new-score-t0').value) || 0,
@@ -750,6 +776,43 @@ showBtn.addEventListener('click', () => {
     sidebar.classList.remove('hidden');
     showBtn.classList.add('hidden');
 });
+
+// Admin Actions Dropdown Toggle
+const adminDropdownTrigger = document.querySelector('.dropdown-trigger');
+const adminDropdownDiv = document.getElementById('admin-actions-div');
+if (adminDropdownTrigger && adminDropdownDiv) {
+    adminDropdownTrigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        adminDropdownDiv.classList.toggle('show');
+    });
+    
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!adminDropdownDiv.contains(e.target)) {
+            adminDropdownDiv.classList.remove('show');
+        }
+    });
+}
+
+function autoLoginAsAdmin() {
+    const adminUser = usersData.find(u => u.name === 'admin' && u.role === 'KRO');
+    if (adminUser) {
+        isAdmin = true;
+        currentUserRole = adminUser.role;
+        loginBtn.classList.add('hidden');
+        if (adminDropdownDiv) adminDropdownDiv.classList.remove('hidden');
+        document.body.classList.add('admin-mode-active');
+        
+        const existingBadge = document.getElementById('admin-badge');
+        if (!existingBadge) {
+            const badge = document.createElement('div');
+            badge.id = 'admin-badge';
+            badge.className = 'admin-badge';
+            badge.innerText = `Admin Mode: ${adminUser.name} (${adminUser.role})`;
+            document.body.appendChild(badge);
+        }
+    }
+}
 
 // Marker Logic
 // markersGroup is initialized in finishInit
@@ -1536,7 +1599,92 @@ document.getElementById('close-manage-activities').addEventListener('click', () 
 function openManageActivitiesModal() {
     clearActivityForm();
     populateManageActivityLists();
+    setupActivityLevelListener();
+    renderActivityTargetList('community'); // Default
     manageActModal.classList.remove('hidden');
+}
+
+function setupActivityLevelListener() {
+    const levelSelect = document.getElementById('act-level-select');
+    if (!levelSelect.dataset.listenerAdded) {
+        levelSelect.addEventListener('change', (e) => {
+            renderActivityTargetList(e.target.value);
+        });
+        levelSelect.dataset.listenerAdded = 'true';
+    }
+}
+
+function renderActivityTargetList(level, selectedEntities = []) {
+    const wrapper = document.getElementById('act-target-wrapper');
+    const label = document.getElementById('act-target-label');
+    label.innerText = `Targeted ${level.charAt(0).toUpperCase() + level.slice(1)}s & Participants`;
+    wrapper.innerHTML = '';
+
+    let entities = [];
+    if (level === 'community') {
+        entities = communitiesData.map(c => ({ id: c.id, name: c.name }));
+    } else if (level === 'municipality') {
+        entities = [...new Set(communitiesData.map(c => c.municipality))].filter(Boolean).map(m => ({ id: m, name: m }));
+    } else if (level === 'district') {
+        entities = [...new Set(communitiesData.map(c => c.district))].filter(Boolean).map(d => ({ id: d, name: d }));
+    } else if (level === 'province') {
+        entities = [...new Set(communitiesData.map(c => c.province))].filter(Boolean).map(p => ({ id: p, name: p }));
+    } else if (level === 'country') {
+        entities = [...new Set(communitiesData.map(c => c.country))].filter(Boolean).map(c => ({ id: c, name: c }));
+    }
+
+    if (entities.length === 0) {
+        wrapper.innerHTML = '<p class="form-hint" style="padding:10px;">No entities found for this level.</p>';
+        return;
+    }
+
+    entities.forEach(ent => {
+        const saved = selectedEntities.find(s => s.id === ent.id);
+        const card = document.createElement('div');
+        card.className = `target-entity-card ${saved ? 'selected' : ''}`;
+        card.innerHTML = `
+            <div class="entity-header">
+                <input type="checkbox" class="act-entity-cb" value="${ent.id}" ${saved ? 'checked' : ''}>
+                <span class="entity-name">${ent.name}</span>
+            </div>
+            <div class="participant-inputs ${saved ? '' : 'hidden'}" style="${saved ? '' : 'display:none;'}">
+                <div class="participant-grid">
+                    <div class="participant-field">
+                        <label>Men (Old Participants)</label>
+                        <input type="number" class="p-men-old" value="${saved ? saved.men : 0}" min="0">
+                    </div>
+                    <div class="participant-field">
+                        <label>Women (Old Participants)</label>
+                        <input type="number" class="p-women-old" value="${saved ? saved.women : 0}" min="0">
+                    </div>
+                    <div class="participant-field">
+                        <label>Men (New Participants)</label>
+                        <input type="number" class="p-men-new" value="${saved ? saved.newMen : 0}" min="0">
+                    </div>
+                    <div class="participant-field">
+                        <label>Women (New Participants)</label>
+                        <input type="number" class="p-women-new" value="${saved ? saved.newWomen : 0}" min="0">
+                    </div>
+                </div>
+            </div>
+        `;
+
+        const cb = card.querySelector('.act-entity-cb');
+        const inputsDiv = card.querySelector('.participant-inputs');
+        cb.addEventListener('change', () => {
+            if (cb.checked) {
+                card.classList.add('selected');
+                inputsDiv.classList.remove('hidden');
+                inputsDiv.style.display = 'block';
+            } else {
+                card.classList.remove('selected');
+                inputsDiv.classList.add('hidden');
+                inputsDiv.style.display = 'none';
+            }
+        });
+
+        wrapper.appendChild(card);
+    });
 }
 
 function populateManageActivityLists() {
@@ -1599,12 +1747,14 @@ function editActivityInModal(actId) {
     document.getElementById('act-edit-id').value = act.id;
     document.getElementById('act-name-input').value = act.name;
     document.getElementById('act-year-input').value = act.year || '';
-    document.getElementById('act-quarter-input').value = act.quarter || 'Q1';
+    document.getElementById('act-quarter-input').value = act.quarter || '1';
+    
+    const level = act.level || 'community';
+    document.getElementById('act-level-select').value = level;
+    renderActivityTargetList(level, act.targetEntities || []);
+
     document.getElementById('act-knowledge-input').checked = !!act.knowledgeGenerated;
     
-    document.querySelectorAll('.act-comm-cb').forEach(cb => {
-        cb.checked = act.communityIds.includes(cb.value);
-    });
     document.querySelectorAll('.act-ind-cb').forEach(cb => {
         cb.checked = act.indicatorIds.includes(cb.value);
     });
@@ -1631,33 +1781,41 @@ function clearActivityForm() {
     document.getElementById('act-edit-id').value = '';
     document.getElementById('act-name-input').value = '';
     document.getElementById('act-year-input').value = '';
-    document.getElementById('act-quarter-input').value = 'Q1';
+    document.getElementById('act-quarter-input').value = '1';
+    document.getElementById('act-level-select').value = 'community';
     document.getElementById('act-knowledge-input').checked = false;
-    document.querySelectorAll('.act-ben-men, .act-ben-women, .act-ben-oldMen, .act-ben-oldWomen, .act-ben-newMen, .act-ben-newWomen').forEach(input => input.value = 0);
-    document.querySelectorAll('.act-comm-cb, .act-ind-cb').forEach(cb => cb.checked = false);
+    renderActivityTargetList('community');
+    document.querySelectorAll('.act-ind-cb').forEach(cb => cb.checked = false);
 }
 
 document.getElementById('save-activity-btn').addEventListener('click', () => {
     const actName = document.getElementById('act-name-input').value.trim();
-    if (!actName) return alert('Please enter an activity name.');
+    if (!actName) return alert('Enter activity name.');
 
-    const selectedComms = [];
-    document.querySelectorAll('.act-comm-cb:checked').forEach(cb => selectedComms.push(cb.value));
+    const level = document.getElementById('act-level-select').value;
+    const targetEntities = [];
+    document.querySelectorAll('.target-entity-card').forEach(card => {
+        const cb = card.querySelector('.act-entity-cb');
+        if (cb && cb.checked) {
+            targetEntities.push({
+                id: cb.value,
+                name: card.querySelector('.entity-name').innerText,
+                men: parseInt(card.querySelector('.p-men-old').value) || 0,
+                women: parseInt(card.querySelector('.p-women-old').value) || 0,
+                newMen: parseInt(card.querySelector('.p-men-new').value) || 0,
+                newWomen: parseInt(card.querySelector('.p-women-new').value) || 0
+            });
+        }
+    });
+
+    if (targetEntities.length === 0) return alert('Please select at least one target entity and enter participants.');
+
     const selectedInds = [];
     document.querySelectorAll('.act-ind-cb:checked').forEach(cb => selectedInds.push(cb.value));
 
     const actYear = document.getElementById('act-year-input').value;
     const actQuarter = document.getElementById('act-quarter-input').value;
     const knowledgeGenerated = document.getElementById('act-knowledge-input').checked;
-
-    const ben = {
-        men: parseInt(document.getElementById('act-ben-men').value) || 0,
-        women: parseInt(document.getElementById('act-ben-women').value) || 0,
-        oldMen: parseInt(document.getElementById('act-ben-oldMen').value) || 0,
-        oldWomen: parseInt(document.getElementById('act-ben-oldWomen').value) || 0,
-        newMen: parseInt(document.getElementById('act-ben-newMen').value) || 0,
-        newWomen: parseInt(document.getElementById('act-ben-newWomen').value) || 0
-    };
 
     const editId = document.getElementById('act-edit-id').value;
     if (editId) {
@@ -1666,10 +1824,11 @@ document.getElementById('save-activity-btn').addEventListener('click', () => {
             activitiesData[idx].name = actName;
             activitiesData[idx].year = actYear;
             activitiesData[idx].quarter = actQuarter;
-            activitiesData[idx].communityIds = selectedComms;
+            activitiesData[idx].level = level;
+            activitiesData[idx].targetEntities = targetEntities;
+            activitiesData[idx].communityIds = level === 'community' ? targetEntities.map(t => t.id) : [];
             activitiesData[idx].indicatorIds = selectedInds;
             activitiesData[idx].knowledgeGenerated = knowledgeGenerated;
-            activitiesData[idx].beneficiaries = ben;
         }
     } else {
         activitiesData.push({
@@ -1677,18 +1836,20 @@ document.getElementById('save-activity-btn').addEventListener('click', () => {
             name: actName,
             year: actYear,
             quarter: actQuarter,
-            communityIds: selectedComms,
+            level: level,
+            targetEntities: targetEntities,
+            communityIds: level === 'community' ? targetEntities.map(t => t.id) : [],
             indicatorIds: selectedInds,
             knowledgeGenerated: knowledgeGenerated,
             knowledgeConfirmed: false,
-            knowledgeLink: '',
-            beneficiaries: ben
+            knowledgeLink: ''
         });
     }
+
     saveActivitiesToStorage();
-    clearActivityForm();
     renderManageActivitiesList();
     renderColumn(null, 'main');
+    manageActModal.classList.add('hidden');
     alert('Activity saved!');
 });
 
@@ -1935,7 +2096,7 @@ function renderArchivedCommunities(listEl) {
     const allKnown = [...communities, ...JSON.parse(localStorage.getItem('added_communities_v2') || '[]')];
     
     archivedCommunityIds.forEach(id => {
-        const c = allKnown.find(x => x.id === id);
+        const c = allCommunitiesRaw.find(x => x.id === id);
         if (!c) return;
         
         const item = document.createElement('div');
@@ -1963,7 +2124,7 @@ function renderArchivedActivities(listEl) {
     const allKnownActivities = [...activities, ...JSON.parse(localStorage.getItem('added_activities_v2') || '[]')];
     
     archivedActivityIds.forEach(id => {
-        const a = allKnownActivities.find(x => x.id === id);
+        const a = allActivitiesRaw.find(x => x.id === id);
         if (!a) return;
         
         const item = document.createElement('div');
@@ -2370,14 +2531,17 @@ function populateDashboardFilters() {
     const countrySelect = document.getElementById('dash-filter-country'); // In case not there
     const provSelect = document.getElementById('dash-filter-province');
     const distSelect = document.getElementById('dash-filter-district');
+    const muniSelect = document.getElementById('dash-filter-municipality');
     const commSelect = document.getElementById('dash-filter-community');
 
     // Simple unique extraction
     const provinces = [...new Set(communitiesData.map(c => c.province))].filter(Boolean).sort();
     const districts = [...new Set(communitiesData.map(c => c.district))].filter(Boolean).sort();
+    const municipalities = [...new Set(communitiesData.map(c => c.municipality))].filter(Boolean).sort();
 
     provSelect.innerHTML = '<option value="All">All Provinces</option>' + provinces.map(p => `<option value="${p}">${p}</option>`).join('');
     distSelect.innerHTML = '<option value="All">All Districts</option>' + districts.map(d => `<option value="${d}">${d}</option>`).join('');
+    muniSelect.innerHTML = '<option value="All">All Municipalities</option>' + municipalities.map(m => `<option value="${m}">${m}</option>`).join('');
     
     // For communities, ensure unique ID but show name + context for duplicates
     commSelect.innerHTML = '<option value="All">All Communities</option>' + communitiesData.map(c => {
@@ -2393,7 +2557,7 @@ function populateDashboardFilters() {
 }
 
 // Auto-refresh filters
-['dash-filter-country', 'dash-filter-province', 'dash-filter-district', 'dash-filter-community', 'dash-filter-year', 'dash-filter-quarter'].forEach(id => {
+['dash-filter-country', 'dash-filter-province', 'dash-filter-district', 'dash-filter-municipality', 'dash-filter-community', 'dash-filter-year', 'dash-filter-quarter'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', updateDashboard);
 });
@@ -2404,6 +2568,7 @@ function updateDashboard() {
     const country = document.getElementById('dash-filter-country').value;
     const prov = document.getElementById('dash-filter-province').value;
     const dist = document.getElementById('dash-filter-district').value;
+    const muni = document.getElementById('dash-filter-municipality').value;
     const commId = document.getElementById('dash-filter-community').value;
     const year = document.getElementById('dash-filter-year').value;
     const quarter = document.getElementById('dash-filter-quarter').value;
@@ -2412,7 +2577,10 @@ function updateDashboard() {
     if (country !== 'All') filteredComms = filteredComms.filter(c => c.country === country);
     if (prov !== 'All') filteredComms = filteredComms.filter(c => c.province === prov);
     if (dist !== 'All') filteredComms = filteredComms.filter(c => c.district === dist);
+    if (muni !== 'All') filteredComms = filteredComms.filter(c => c.municipality === muni);
     if (commId !== 'All') filteredComms = filteredComms.filter(c => c.id === commId);
+
+    const filteredCommIds = new Set(filteredComms.map(c => c.id));
 
     // Stats
     document.getElementById('dash-stat-communities').innerText = filteredComms.length;
@@ -2425,7 +2593,7 @@ function updateDashboard() {
     const aggDemo = { population: 0, male: 0, female: 0, children: 0, elderly: 0 };
     filteredComms.forEach(c => {
         if (c.demographics) {
-            aggDemo.population += (c.demographics.population || 0);
+            aggDemo.population += (c.demographics.total || 0);
             aggDemo.male += (c.demographics.male || 0);
             aggDemo.female += (c.demographics.female || 0);
             aggDemo.children += (c.demographics.children || 0);
@@ -2438,22 +2606,89 @@ function updateDashboard() {
     document.getElementById('dash-agg-children').innerText = aggDemo.children.toLocaleString();
     document.getElementById('dash-agg-elderly').innerText = aggDemo.elderly.toLocaleString();
 
-    // Beneficiary Aggregation (only from activities matching filters)
+    // Beneficiary Aggregation (Multi-Level)
     const totals = { men: 0, women: 0, oldMen: 0, oldWomen: 0, newMen: 0, newWomen: 0 };
+    
     activitiesData.forEach(act => {
-        // Filter by year/quarter if specified
+        // 1. Time Filters
         if (year !== 'All' && year !== '' && act.year !== year) return;
         if (quarter !== 'All' && act.quarter !== quarter) return;
 
-        const isInFiltered = act.communityIds.some(id => filteredComms.find(fc => fc.id === id));
-        if (isInFiltered && act.beneficiaries) {
-            Object.keys(totals).forEach(key => {
-                totals[key] += (act.beneficiaries[key] || 0);
-            });
+        // 2. Data Migration Support (Handle old activities if any)
+        if (!act.targetEntities && act.beneficiaries) {
+            // Check if old activity matches geographical filters via communityIds
+            const match = (commId === 'All') 
+                ? act.communityIds.some(id => filteredCommIds.has(id))
+                : act.communityIds.includes(commId);
+            
+            if (match) {
+                totals.men += (act.beneficiaries.men || 0);
+                totals.women += (act.beneficiaries.women || 0);
+                totals.newMen += (act.beneficiaries.newMen || 0);
+                totals.newWomen += (act.beneficiaries.newWomen || 0);
+            }
+            return;
         }
+
+        // 3. New Multi-Level Logic
+        if (!act.targetEntities) return;
+
+        act.targetEntities.forEach(ent => {
+            let isMatch = false;
+
+            if (act.level === 'community') {
+                // Entity ID is Community ID
+                isMatch = filteredCommIds.has(ent.id);
+            } else if (act.level === 'municipality') {
+                // Entity ID is Municipality Name
+                // Match if (muni filter is All OR muni filter == ent.id) 
+                // AND (higher level filters match)
+                isMatch = (muni === 'All' || muni === ent.id) &&
+                          (dist === 'All' || communitiesData.some(c => c.municipality === ent.id && c.district === dist)) &&
+                          (prov === 'All' || communitiesData.some(c => c.municipality === ent.id && c.province === prov)) &&
+                          (country === 'All' || communitiesData.some(c => c.municipality === ent.id && c.country === country));
+            } else if (act.level === 'district') {
+                isMatch = (dist === 'All' || dist === ent.id) &&
+                          (prov === 'All' || communitiesData.some(c => c.district === ent.id && c.province === prov)) &&
+                          (country === 'All' || communitiesData.some(c => c.district === ent.id && c.country === country));
+            } else if (act.level === 'province') {
+                isMatch = (prov === 'All' || prov === ent.id) &&
+                          (country === 'All' || communitiesData.some(c => c.province === ent.id && c.country === country));
+            } else if (act.level === 'country') {
+                isMatch = (country === 'All' || country === ent.id);
+            }
+
+            // Further narrow down if specific muni/comm selected but activity is at higher level
+            // Example: If District level activity targets District D, and muni filter is M (where M is in D), match should be TRUE.
+            // But if muni filter M is NOT in District D, match should be FALSE.
+            if (isMatch) {
+                if (muni !== 'All' && act.level === 'district') {
+                    isMatch = communitiesData.some(c => c.district === ent.id && c.municipality === muni);
+                } else if (commId !== 'All') {
+                    // If a specific community is filtered, only count if it's within that target entity
+                    const targetComm = communitiesData.find(c => c.id === commId);
+                    if (targetComm) {
+                        if (act.level === 'municipality') isMatch = (targetComm.municipality === ent.id);
+                        if (act.level === 'district') isMatch = (targetComm.district === ent.id);
+                        if (act.level === 'province') isMatch = (targetComm.province === ent.id);
+                        if (act.level === 'country') isMatch = (targetComm.country === ent.id);
+                    } else {
+                        isMatch = false;
+                    }
+                }
+            }
+
+            if (isMatch) {
+                totals.men += (ent.men || 0);
+                totals.women += (ent.women || 0);
+                totals.newMen += (ent.newMen || 0);
+                totals.newWomen += (ent.newWomen || 0);
+            }
+        });
     });
 
     renderCharts(totals);
+    updateDashboardTable(totals); // Assuming this helper exists or I'll add it
 }
 
 function renderCharts(totals) {
@@ -2463,17 +2698,17 @@ function renderCharts(totals) {
     if (reachChart) reachChart.destroy();
     if (pieChart) pieChart.destroy();
 
-    const labels = ['Men', 'Women', 'Old Men', 'Old Women', 'New Men', 'New Women'];
-    const dataVals = [totals.men, totals.women, totals.oldMen, totals.oldWomen, totals.newMen, totals.newWomen];
+    const labels = ['Men (Old Participants)', 'Women (Old Participants)', 'Men (New Participants)', 'Women (New Participants)'];
+    const dataVals = [totals.men, totals.women, totals.newMen, totals.newWomen];
 
     reachChart = new Chart(ctxBar, {
         type: 'bar',
         data: {
             labels: labels,
             datasets: [{
-                label: 'Total Reach',
+                label: 'Reach (Selected Categories)',
                 data: dataVals,
-                backgroundColor: ['#3b82f6', '#ec4899', '#6366f1', '#f43f5e', '#10b981', '#f59e0b']
+                backgroundColor: ['#3b82f6', '#ec4899', '#10b981', '#f59e0b']
             }]
         },
         options: { responsive: true, maintainAspectRatio: false }
@@ -2484,33 +2719,38 @@ function renderCharts(totals) {
         data: {
             labels: ['Men', 'Women'],
             datasets: [{
-                data: [totals.men + totals.oldMen + totals.newMen, totals.women + totals.oldWomen + totals.newWomen],
+                data: [totals.men + totals.newMen, totals.women + totals.newWomen],
                 backgroundColor: ['#3b82f6', '#ec4899']
             }]
         },
         options: { responsive: true, maintainAspectRatio: false }
     });
+}
 
-    // Populate the table
+function updateDashboardTable(totals) {
     const tableBody = document.getElementById('reach-table-body');
-    if (tableBody) {
-        tableBody.innerHTML = '';
-        labels.forEach((lbl, i) => {
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td style="padding: 8px; border-bottom: 1px solid #eee;">${lbl}</td>
-                <td style="padding: 8px; border-bottom: 1px solid #eee; font-weight: bold;">${dataVals[i].toLocaleString()}</td>
-            `;
-            tableBody.appendChild(tr);
-        });
-        const totalAll = dataVals.reduce((a, b) => a + b, 0);
-        const trTotal = document.createElement('tr');
-        trTotal.innerHTML = `
-            <td style="padding: 8px; font-weight: bold; color: var(--primary);">Total Beneficiaries</td>
-            <td style="padding: 8px; font-weight: bold; color: var(--primary);">${totalAll.toLocaleString()}</td>
+    if (!tableBody) return;
+
+    const labels = ['Men (Old Participants)', 'Women (Old Participants)', 'Men (New Participants)', 'Women (New Participants)'];
+    const dataVals = [totals.men, totals.women, totals.newMen, totals.newWomen];
+
+    tableBody.innerHTML = '';
+    labels.forEach((lbl, i) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td style="padding: 8px; border-bottom: 1px solid #eee;">${lbl}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; font-weight: bold;">${dataVals[i].toLocaleString()}</td>
         `;
-        tableBody.appendChild(trTotal);
-    }
+        tableBody.appendChild(tr);
+    });
+
+    const totalReach = totals.newMen + totals.newWomen;
+    const trTotal = document.createElement('tr');
+    trTotal.innerHTML = `
+        <td style="padding: 8px; font-weight: bold; color: var(--primary);">Total Reach (New)</td>
+        <td style="padding: 8px; font-weight: bold; color: var(--primary);">${totalReach.toLocaleString()}</td>
+    `;
+    tableBody.appendChild(trTotal);
 }
 
 // Reach Toggle Button
@@ -2569,6 +2809,7 @@ function exportToCSV(filename, csvData) {
     const modal         = document.getElementById('export-modal');
     const cancelBtn     = document.getElementById('export-modal-cancel');
     const confirmBtn    = document.getElementById('export-modal-confirm');
+    const exportZipBtn  = document.getElementById('export-zip-btn');
     const chkActs       = document.getElementById('export-chk-activities');
     const chkComms      = document.getElementById('export-chk-communities');
     const commSubopts   = document.getElementById('export-comm-suboptions');
@@ -2647,6 +2888,7 @@ function exportToCSV(filename, csvData) {
     confirmBtn.addEventListener('click', () => {
         const exportActs  = chkActs.checked;
         const exportComms = chkComms.checked;
+        const exportInters = confirm('Do you also want to include Interventions in the export?');
         const scope       = radioSpecific.checked ? 'specific' : 'all';
 
         if (!exportActs && !exportComms) {
@@ -2739,9 +2981,78 @@ function exportToCSV(filename, csvData) {
             exportToCSV(filename, commRows.join('\n'));
         }
 
+        if (exportInters) {
+            const inters = JSON.parse(localStorage.getItem('crmc_interventions_v1') || '[]');
+            if (inters.length > 0) {
+                const interCSV = objectToCSV(inters.map(i => ({
+                    Id: i.id,
+                    Name: i.name,
+                    Coords: i.coords.join(';'),
+                    Description: i.description || ''
+                })));
+                exportToCSV(`interventions_${Date.now()}.csv`, interCSV);
+            }
+        }
+
         modal.classList.add('hidden');
-        alert(`Export complete!${exportActs ? ' Activities included.' : ''}${exportComms ? ` ${commsToExport.length} community/communities included.` : ''}`);
+        alert(`Export complete!${exportActs ? ' Activities included.' : ''}${exportComms ? ` ${commsToExport.length} communities included.` : ''}${exportInters ? ' Interventions included.' : ''}`);
     });
+
+    // ZIP Export logic
+    if (exportZipBtn) {
+        exportZipBtn.addEventListener('click', async () => {
+            const zip = new JSZip();
+            
+            // 1. Communities
+            const comms = communitiesData;
+            const commHeaders = ['Id', 'Name', 'Country', 'Province', 'District', 'Municipality', 'Lat', 'Lng', 'T0_Score', 'T1_Score', 'TotalPop', 'Male', 'Female', 'Children', 'Elderly', 'Disabilities', 'HHs', 'Description'];
+            const allIndIds = new Set();
+            comms.forEach(c => { if (c.gradings) Object.keys(c.gradings).forEach(id => allIndIds.add(id)); });
+            const sortedIndIds = Array.from(allIndIds).sort();
+            sortedIndIds.forEach(id => commHeaders.push(`${id}_t0`, `${id}_t1`));
+            
+            const commRows = [commHeaders.join(',')];
+            comms.forEach(c => {
+                const row = [c.id, c.name, c.country, c.province || '', c.district || '', c.municipality || '', c.coords[0], c.coords[1], c.t0_score, c.t1_score || '', c.demographics.total, c.demographics.male, c.demographics.female, c.demographics.children, c.demographics.elderly, c.demographics.disabilities, c.demographics.hhs || 0, c.demographics.description || ''];
+                sortedIndIds.forEach(id => {
+                    const g = (c.gradings && c.gradings[id]) ? c.gradings[id] : { t0: '', t1: '' };
+                    row.push(g.t0 || '', g.t1 || '');
+                });
+                commRows.push(row.map(v => (v === null || v === undefined) ? '' : `"${String(v).replace(/"/g, '""')}"`).join(','));
+            });
+            zip.file("communities_all.csv", commRows.join('\n'));
+
+            // 2. Activities
+            const actCSV = objectToCSV(activitiesData.map(a => ({
+                Id: a.id, Name: a.name, Year: a.year || '', Quarter: a.quarter || '', IndicatorIds: a.indicatorIds.join(';'), CommunityIds: a.communityIds.join(';'),
+                KnowledgeGenerated: a.knowledgeGenerated, Men_Old: a.beneficiaries.men, Women_Old: a.beneficiaries.women, Men_New: a.beneficiaries.newMen, Women_New: a.beneficiaries.newWomen,
+                Municipality: a.municipality || '', District: a.district || '', Province: a.province || '', Country: a.country || ''
+            })));
+            zip.file("activities_all.csv", actCSV);
+
+            // 3. Interventions
+            const exportInters = confirm('Include Interventions in the ZIP package?');
+            if (exportInters) {
+                const inters = JSON.parse(localStorage.getItem('crmc_interventions_v1') || '[]');
+                const interCSV = objectToCSV(inters.map(i => ({ Id: i.id, Name: i.name, Coords: i.coords.join(';'), Description: i.description || '' })));
+                zip.file("interventions_all.csv", interCSV);
+            }
+
+            // 4. Indicators
+            const inds = JSON.parse(localStorage.getItem('crmc_indicators_v4') || '[]');
+            const indCSV = objectToCSV(inds.map(i => ({ Id: i.id, Name: i.name, Capital: i.capital })));
+            zip.file("indicators.csv", indCSV);
+
+            // Generate ZIP
+            const content = await zip.generateAsync({ type: "blob" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(content);
+            link.download = `crmc_data_package_${Date.now()}.zip`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+    }
 })();
 
 document.getElementById('import-data-btn').addEventListener('click', () => {
@@ -3058,6 +3369,54 @@ window.deleteIntervention = function(id) {
     renderInterventionMarkers();
     renderInterventionsList();
 };
+
+// Intervention Map View Toggling
+const viewInterMapBtn = document.getElementById('view-intervention-map-btn');
+const closeInterMapBtn = document.getElementById('close-inter-map-btn');
+
+if (viewInterMapBtn) {
+    viewInterMapBtn.addEventListener('click', openInterventionMapView);
+}
+
+if (closeInterMapBtn) {
+    closeInterMapBtn.addEventListener('click', closeInterventionMapView);
+}
+
+function openInterventionMapView() {
+    // 1. Manage Layers
+    if (map.hasLayer(markersGroup)) map.removeLayer(markersGroup);
+    if (!map.hasLayer(interventionsGroup)) map.addLayer(interventionsGroup);
+
+    // 2. Manage UI
+    manageInterventionsModal.classList.add('hidden');
+    sidebar.classList.add('hidden');
+    showBtn.classList.add('hidden'); // Fully hide sidebar controls
+    closeInterMapBtn.classList.remove('hidden');
+
+    // 3. Reset Map View to fit interventions if any exist
+    if (interventionsData.length > 0) {
+        const bounds = L.latLngBounds(interventionsData.map(i => i.coords));
+        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+    }
+}
+
+function closeInterventionMapView() {
+    // 1. Manage Layers
+    if (!map.hasLayer(markersGroup)) map.addLayer(markersGroup);
+    // Optionally keep interventions visible or hide them. 
+    // Usually, "return to previous stage" implies showing communities primarily.
+    // I will keep interventions added if they were before, or we can hide them.
+    // Let's hide them for a clean "standard" view.
+    // map.removeLayer(interventionsGroup);
+
+    // 2. Manage UI
+    sidebar.classList.remove('hidden');
+    // If sidebar is active, showBtn should be hidden anyway.
+    closeInterMapBtn.classList.add('hidden');
+    
+    // 3. Reset View
+    renderMap(); 
+}
 
 // Start initialization
 initData();
