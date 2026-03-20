@@ -57,7 +57,8 @@ async function initData() {
         }
     } catch (e) {
         console.warn("Could not load communities_all.csv. Falling back to localStorage.", e);
-        communitiesData = JSON.parse(localStorage.getItem('added_communities_v2') || '[]');
+        allCommunitiesRaw = JSON.parse(localStorage.getItem('added_communities_v2') || '[]');
+        communitiesData = allCommunitiesRaw.filter(c => !archivedCommunityIds.includes(c.id));
     }
 
     // 2. Load Activities
@@ -81,7 +82,8 @@ async function initData() {
         }
     } catch (e) {
         console.warn("Could not load activities CSV. Falling back to localStorage.", e);
-        activitiesData = JSON.parse(localStorage.getItem('added_activities_v2') || '[]');
+        allActivitiesRaw = JSON.parse(localStorage.getItem('added_activities_v2') || '[]');
+        activitiesData = allActivitiesRaw.filter(a => !archivedActivityIds.includes(a.id));
     }
 
     // Continue initialization
@@ -267,7 +269,7 @@ const communityMarkers = {};
 // UI Handles
 let sidebar, showBtn, hideBtn;
 let communitySelect;
-let loginBtn, logoutBtn, manageActivitiesBtn, archivedCommunitiesBtn, loginModal, addCommModal, manageActModal, manageUsersModal, manageIndModal, archiveModal, adminNameInput, adminPasswordInput, loginError, manageUsersBtn, manageIndBtn, manageCommunitiesBtn, manageKnowledgeBtn, manageCountriesBtn, manageCommModal, manageKnowledgeModal, manageCountriesModal, manageInterventionsBtn, manageInterventionsModal;
+let loginBtn, logoutBtn, manageActivitiesBtn, archivedCommunitiesBtn, loginModal, addCommModal, manageActModal, manageUsersModal, manageIndModal, archiveModal, adminNameInput, adminPasswordInput, loginError, manageUsersBtn, manageIndBtn, manageCommunitiesBtn, manageKnowledgeBtn, manageCountriesBtn, manageCommModal, manageKnowledgeModal, manageCountriesModal, manageInterventionsBtn, manageInterventionsModal, adminDropdownDiv;
 
 
 // Initialize UI Handles immediately (before async data load)
@@ -300,6 +302,7 @@ function setupUIHandles() {
     manageCountriesModal = document.getElementById('manage-countries-modal');
     manageInterventionsBtn = document.getElementById('manage-interventions-btn');
     manageInterventionsModal = document.getElementById('manage-interventions-modal');
+    adminDropdownDiv = document.getElementById('admin-actions-div');
 
     communitySelect = document.getElementById('community-select');
 }
@@ -463,6 +466,8 @@ document.getElementById('login-submit').addEventListener('click', () => {
         logoutBtn.classList.remove('hidden');
         manageActivitiesBtn.classList.remove('hidden');
         archivedCommunitiesBtn.classList.remove('hidden');
+        document.getElementById('add-community-btn-dropdown')?.classList.remove('hidden');
+        document.getElementById('add-activity-btn-dropdown')?.classList.remove('hidden');
         
         // Role-Based Visibility
         if (currentUserRole === 'KRO') {
@@ -476,6 +481,7 @@ document.getElementById('login-submit').addEventListener('click', () => {
             document.getElementById('import-data-btn').classList.remove('hidden');
             manageCountriesBtn.classList.remove('hidden');
             manageInterventionsBtn.classList.remove('hidden');
+            if (adminDropdownDiv) adminDropdownDiv.classList.remove('hidden');
             
             // Show "Add New Community" in the manager modal
             const addCommBtn = document.getElementById('trigger-map-add-btn');
@@ -521,6 +527,9 @@ logoutBtn.addEventListener('click', () => {
     document.getElementById('import-data-btn').classList.add('hidden');
     manageCountriesBtn.classList.add('hidden');
     manageInterventionsBtn.classList.add('hidden');
+    document.getElementById('add-community-btn-dropdown')?.classList.add('hidden');
+    document.getElementById('add-activity-btn-dropdown')?.classList.add('hidden');
+    if (adminDropdownDiv) adminDropdownDiv.classList.add('hidden');
     document.body.classList.remove('admin-mode-active');
     const badge = document.getElementById('admin-badge');
     if (badge) badge.remove();
@@ -778,13 +787,14 @@ showBtn.addEventListener('click', () => {
 });
 
 // Admin Actions Dropdown Toggle
-const adminDropdownTrigger = document.querySelector('.dropdown-trigger');
-const adminDropdownDiv = document.getElementById('admin-actions-div');
-if (adminDropdownTrigger && adminDropdownDiv) {
-    adminDropdownTrigger.addEventListener('click', (e) => {
-        e.stopPropagation();
-        adminDropdownDiv.classList.toggle('show');
-    });
+if (adminDropdownDiv) {
+    const trigger = adminDropdownDiv.querySelector('.dropdown-trigger');
+    if (trigger) {
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            adminDropdownDiv.classList.toggle('show');
+        });
+    }
     
     // Close dropdown when clicking outside
     document.addEventListener('click', (e) => {
@@ -801,6 +811,9 @@ function autoLoginAsAdmin() {
         currentUserRole = adminUser.role;
         loginBtn.classList.add('hidden');
         if (adminDropdownDiv) adminDropdownDiv.classList.remove('hidden');
+        document.getElementById('add-community-btn-dropdown')?.classList.remove('hidden');
+        document.getElementById('add-activity-btn-dropdown')?.classList.remove('hidden');
+        document.getElementById('trigger-map-add-btn')?.classList.remove('hidden');
         document.body.classList.add('admin-mode-active');
         
         const existingBadge = document.getElementById('admin-badge');
@@ -2073,7 +2086,9 @@ function updateArchiveTabStyles() {
 function openArchiveModal() {
     updateArchiveTabStyles();
     renderArchiveList();
-    archiveModal.classList.remove('hidden');
+    if (archiveModal) {
+        archiveModal.classList.remove('hidden');
+    }
 }
 
 function renderArchiveList() {
@@ -3138,6 +3153,22 @@ const setupFormToggle = (showBtnId, hideBtnId, sectionId) => {
 setupFormToggle('show-add-activity-btn', 'hide-add-activity-btn', 'add-activity-section');
 setupFormToggle('show-add-user-btn', 'hide-add-user-btn', 'add-user-section');
 setupFormToggle('show-add-indicator-btn', 'hide-add-indicator-btn', 'add-indicator-section');
+
+// Register new dropdown add buttons
+document.getElementById('add-community-btn-dropdown')?.addEventListener('click', () => {
+    isAddingCommunityMode = true;
+    const promptText = document.getElementById('map-click-prompt-text');
+    if (promptText) promptText.textContent = 'Please click on the map to set the location for the new community.';
+    const prompt = document.getElementById('map-click-prompt');
+    if (prompt) {
+        prompt.classList.remove('hidden');
+        prompt.style.display = 'flex';
+    }
+});
+document.getElementById('add-activity-btn-dropdown')?.addEventListener('click', () => {
+    manageActModal.classList.remove('hidden');
+    document.getElementById('add-activity-section').classList.remove('hidden');
+});
 
 // ===== COMMUNITY ADDITION FLOW (FROM MODAL) =====
 let isAddingCommunityMode = false;
