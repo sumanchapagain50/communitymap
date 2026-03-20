@@ -1,0 +1,1 @@
+const interventionsDataStaticRaw = "Id,Name,Lat,Lng,CommunityIds\ninv_01,Embankment Strengthening,28.2281,81.3709,c_01;c_02\ninv_02,Solar Pumping System,28.2300,81.3800,c_01;c_03\ninv_03,Early Warning Sirens,28.2250,81.3650,c_02;c_04\ninv_04,Mangrove Afforestation,28.2400,81.3900,c_05\ninv_05,Community Health Post,28.2100,81.3500,c_06\n";

@@ -10,13 +10,13 @@
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     <!-- Lucide Icons -->
+    <!-- All Scores Pop-Up logic moved to body -->
+
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- PapaParse for CSV -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-    <!-- JSZip for ZIP compression -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 
 <body>
@@ -36,46 +36,47 @@
 
         <div class="sidebar-header">
             <div class="header-controls">
-                <!-- Admin Actions Dropdown -->
-                <div id="admin-actions-div" class="admin-dropdown hidden">
+                <!-- Quick Actions Dropdown -->
+                <div id="admin-actions-div" class="admin-dropdown">
                     <button id="admin-actions-btn" class="toggle-btn dropdown-trigger">
-                        Admin Actions <i data-lucide="chevron-down"></i>
+                        Quick Actions <i data-lucide="chevron-down"></i>
                     </button>
                     <div class="dropdown-content">
-                        <button id="manage-communities-btn" class="dropdown-item">Manage Communities</button>
-                        <button id="manage-activities-btn" class="dropdown-item">Manage Activities</button>
-                        <button id="manage-users-btn" class="dropdown-item">Manage Users</button>
-                        <button id="manage-indicators-btn" class="dropdown-item">Manage Indicators</button>
-                        <button id="manage-knowledge-btn" class="dropdown-item">Manage Knowledge</button>
-                        <button id="manage-countries-btn" class="dropdown-item">Manage Countries</button>
-                        <button id="manage-interventions-btn" class="dropdown-item" style="color: #d97706;">📍 Interventions</button>
-                        <button id="archived-communities-btn" class="dropdown-item">Archive</button>
-                        <button id="kro-dashboard-btn" class="dropdown-item">Reach Dashboard</button>
-                        <button id="export-data-btn" class="dropdown-item">Export Data (CSV)</button>
-                        <button id="export-zip-btn" class="dropdown-item">Export Complete Package (ZIP)</button>
-                        <button id="import-data-btn" class="dropdown-item">Import Data</button>
-                        <button id="admin-logout-btn" class="dropdown-item danger">Logout</button>
+                        <button id="quick-activities-btn" class="dropdown-item" style="color: #10b981;">📋 Activities</button>
+                        <button id="manage-communities-btn" class="dropdown-item admin-only hidden">Manage Communities</button>
+                        <button id="manage-activities-btn" class="dropdown-item admin-only hidden">Manage Activities</button>
+                        <button id="manage-users-btn" class="dropdown-item admin-only hidden">Manage Users</button>
+                        <button id="manage-indicators-btn" class="dropdown-item admin-only hidden">Manage Indicators</button>
+                        <button id="manage-knowledge-btn" class="dropdown-item admin-only hidden">Manage Knowledge</button>
+                        <button id="manage-countries-btn" class="dropdown-item admin-only hidden">Manage Countries</button>
+                        <button id="manage-interventions-btn" class="dropdown-item" style="color: #d97706;">📍 Intervention Map</button>
+                        <button id="all-scores-btn" class="dropdown-item" style="color: #2563eb;">📊 All Scores</button>
+                        <button id="archived-communities-btn" class="dropdown-item admin-only hidden">Archive</button>
+                        <button id="kro-dashboard-btn" class="dropdown-item"> 📈 Reach Dashboard</button>
+                        <button id="import-data-btn" class="dropdown-item admin-only hidden">Import Data</button>
+                        <button id="admin-logout-btn" class="dropdown-item danger admin-only hidden">Logout</button>
                     </div>
                 </div>
 
-                <button id="admin-login-btn" class="toggle-btn">Admin Login</button>
+                <button id="admin-login-btn" class="toggle-btn hidden">Admin Login</button>
                 <input type="file" id="import-data-file" accept=".csv" multiple style="display:none;">
             </div>
         </div>
 
         <div class="sidebar-content-wrapper">
+            <div class="global-filters" style="padding: 15px 20px 0;">
+                <div class="country-zoom">
+                    <select id="country-select" style="min-width: 140px; padding: 6px 10px; border-radius: 8px; border: 1px solid #e2e8f0; background: white; font-weight: 600; color: var(--text-main); cursor: pointer;">
+                        <option value="All">All Countries</option>
+                    </select>
+                    <select id="community-select">
+                        <option value="All">All Communities</option>
+                    </select>
+                </div>
+            </div>
             <!-- Column 1: Main Community -->
             <div class="sidebar-column" id="col-main">
                 <div class="column-info">
-                    <div class="country-zoom">
-                        <select id="country-select">
-                            <option value="All">All Communities</option>
-                            <option value="Nepal">Nepal Only</option>
-                           </select>
-                        <select id="community-select">
-                            <option value="All">All Communities</option>
-                        </select>
-                    </div>
                     <h2 id="community-name">Community Name</h2>
                     <!-- Admin Edit Button (injected by JS) -->
                     <div id="admin-edit-area"></div>
@@ -85,7 +86,6 @@
                     <button class="tab-btn active" data-tab="score" data-col="main">CRMC Grading</button>
                     <button class="tab-btn" data-tab="demographics" data-col="main">Demographics</button>
                     <button class="tab-btn" data-tab="activities" data-col="main">Activities</button>
-                    <button class="tab-btn" data-tab="knowledge" data-col="main">Knowledge</button>
                 </div>
 
                 <div class="tab-content" id="tab-score-main">
@@ -99,7 +99,7 @@
                                 </div>
                                 <div class="gauge-toggles">
                                     <label><input type="checkbox" id="show-t0-main" checked> T0</label>
-                                    <label><input type="checkbox" id="show-t1-main" checked> T1</label>
+                                    <label><input type="checkbox" id="show-t1-main"> T1</label>
                                 </div>
                                 <div class="type-toggles">
                                     <label class="type-flood"><input type="checkbox" id="filter-flood-main" checked> Floods</label>
@@ -133,31 +133,56 @@
                     </div>
                 </div>
             </div>
+            
+            <!-- Column 2: Intervention Details -->
+            <div class="sidebar-column hidden" id="col-intervention">
+                <!-- Content gets injected by JS -->
+            </div>
 
         </div>
     </div>
 
-    <!-- Login Modal -->
+    <!-- All Scores Modal -->
+    <div id="all-scores-modal" class="modal hidden">
+        <div class="modal-content full-width">
+            <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin: 0; color: var(--primary);">All Community Scores</h2>
+                <div class="header-actions" style="display: flex; gap: 15px; align-items: center;">
+                    <select id="all-scores-country-select" class="form-select" style="min-width: 150px;">
+                        <option value="All">All Countries</option>
+                    </select>
+                    <button class="modal-close-x" id="close-all-scores-modal">&times;</button>
+                </div>
+            </div>
+            <div id="all-scores-grid" class="scores-grid"></div>
+        </div>
+    </div>
+
+    <!-- Admin Login Modal -->
     <div id="login-modal" class="modal hidden">
         <div class="modal-content">
-            <h3>Login</h3>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3 style="margin: 0;">Admin Login</h3>
+            </div>
             <div class="form-group">
-                <label for="admin-username">Username</label>
-                <select id="admin-username">
-                    <!-- Populated dynamically by JS -->
+                <label>User</label>
+                <select id="admin-username" class="form-select">
+                    <!-- populated via js -->
                 </select>
             </div>
             <div class="form-group">
-                <label for="admin-password">Password</label>
-                <input type="password" id="admin-password" placeholder="Enter password...">
-                <p id="login-error" class="error-text hidden">Incorrect username or password.</p>
+                <label>Password</label>
+                <input type="password" id="admin-password">
+                <div id="login-error" class="error-text hidden">Incorrect password</div>
             </div>
             <div class="modal-actions">
-                <button id="login-submit" class="toggle-btn primary">Login</button>
-                <button id="login-cancel" class="toggle-btn">Cancel</button>
+                <button class="toggle-btn-small" id="login-cancel">Cancel</button>
+                <button class="toggle-btn-small primary" id="login-submit">Login</button>
             </div>
         </div>
     </div>
+
+
 
     <!-- Add / Edit Community Modal -->
     <div id="add-community-modal" class="modal hidden">
@@ -320,76 +345,9 @@
     <!-- Manage Activities Modal -->
     <div id="manage-activities-modal" class="modal hidden">
         <div class="modal-content large">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                <h3>Manage Activities</h3>
-                <button id="show-add-activity-btn" class="toggle-btn-small primary">+ Add New Activity</button>
-            </div>
-
-            <!-- Add New Activity Section -->
-            <div id="add-activity-section" class="manage-act-add hidden">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                    <h4 style="color: var(--primary);">Add / Edit Activity</h4>
-                    <button id="hide-add-activity-btn" class="toggle-btn-small" style="background: none; border: none; font-size: 1.2rem; padding: 0;">&times;</button>
-                </div>
-                <input type="hidden" id="act-edit-id" value="">
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label>Activity Name</label>
-                        <input type="text" id="act-name-input" placeholder="e.g., Tree Plantation" list="activity-name-suggestions">
-                        <datalist id="activity-name-suggestions"></datalist>
-                    </div>
-                    <div class="form-group">
-                        <label>Execution Year</label>
-                        <input type="number" id="act-year-input" placeholder="e.g., 2024" min="2000" max="2100">
-                    </div>
-                    <div class="form-group">
-                        <label>Quarter</label>
-                        <select id="act-quarter-input">
-                            <option value="1">1</option>
-                            <option value="2">2</option>
-                            <option value="3">3</option>
-                            <option value="4">4</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Activity Level</label>
-                        <select id="act-level-select">
-                            <option value="community">Community</option>
-                            <option value="municipality">Municipality</option>
-                            <option value="district">District</option>
-                            <option value="province">Province</option>
-                            <option value="country">Country</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="form-group" style="margin-top: 15px;">
-                    <label id="act-target-label">Targeted Communities & Participants</label>
-                    <div id="act-target-wrapper" class="activity-target-wrapper">
-                        <!-- Dynamic list of entities with participant inputs will appear here -->
-                        <p class="form-hint" style="padding:10px;">Select a level and targets to enter participant data.</p>
-                    </div>
-                </div>
-                <div class="form-group" style="margin-top: 10px;">
-                    <label class="check-label" style="width: auto; padding: 10px;">
-                        <input type="checkbox" id="act-knowledge-input"> Knowledge Generated?
-                    </label>
-                </div>
-                <div class="form-group hidden" style="display:none;">
-                    <label>Assign to Communities</label>
-                    <div id="act-community-checklist" class="activity-checklist two-col">
-                        <!-- Kept for legacy/background compatibility but hidden -->
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>Assign to Indicators</label>
-                    <div id="act-indicator-checklist" class="indicator-checklist">
-                        <!-- Populated by JS -->
-                    </div>
-                </div>
-                <div style="display: flex; gap: 10px; margin-top: 10px;">
-                    <button type="button" id="save-activity-btn" class="toggle-btn primary">Save Activity</button>
-                    <button type="button" id="clear-act-form-btn" class="toggle-btn">Clear</button>
-                </div>
+            <div id="activities-manage-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <h3 style="margin-bottom:0; color: var(--primary);">Manage Activities</h3>
+                <button type="button" id="close-manage-activities" class="modal-close-x">&times;</button>
             </div>
 
             <hr style="margin: 20px 0; border-color: #e2e8f0;">
@@ -398,10 +356,6 @@
             <h4 style="margin-bottom: 12px; color: var(--text-main);">Existing Activities</h4>
             <div id="manage-activities-list">
                 <!-- Populated by JS -->
-            </div>
-
-            <div class="modal-actions">
-                <button type="button" id="close-manage-activities" class="toggle-btn">Close</button>
             </div>
         </div>
     </div>
@@ -632,7 +586,10 @@
     <!-- Admin Dashboard Modal -->
     <div id="admin-dashboard-modal" class="modal hidden">
         <div class="modal-content extra-large">
-            <h3 style="color: var(--primary);">Reach Dashboard</h3>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <h3 style="color: var(--primary); margin:0;">Reach Dashboard</h3>
+                <button type="button" id="close-dashboard-modal" class="modal-close-x">&times;</button>
+            </div>
             <div class="dashboard-controls" style="gap: 10px; margin-bottom: 20px; flex-wrap: wrap;">
                 <select id="dash-filter-country">
                     <option value="All">All Countries</option>
@@ -726,8 +683,7 @@
                 </div>
             </div>
 
-            <div class="modal-actions" style="margin-top: 20px;">
-                <button type="button" id="close-dashboard-modal" class="toggle-btn">Close Dashboard</button>
+                </div>
             </div>
         </div>
     </div>
@@ -831,71 +787,14 @@
         </div>
     </div>
 
-    <!-- Export Options Modal -->
-    <div id="export-modal" class="modal hidden">
-        <div class="modal-content large">
-            <h3 style="color: var(--primary);">📤 Export Data</h3>
-            <p class="form-hint" style="margin-bottom: 18px;">Choose what to include in the export.</p>
-
-            <!-- What to export -->
-            <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:20px;">
-
-                <!-- Activities checkbox -->
-                <label style="display:flex; align-items:center; gap:10px; padding:12px 16px;
-                               background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; cursor:pointer; font-weight:600;">
-                    <input type="checkbox" id="export-chk-activities" checked style="accent-color:var(--primary); width:17px; height:17px;">
-                    <span>📋 Activities</span>
-                    <small style="color:var(--text-muted); font-weight:400; margin-left:4px;">— exports activities.csv</small>
-                </label>
-
-                <!-- Communities checkbox + sub-options -->
-                <div style="border:1px solid #e2e8f0; border-radius:10px; overflow:hidden;">
-                    <label style="display:flex; align-items:center; gap:10px; padding:12px 16px;
-                                  background:#f8fafc; cursor:pointer; font-weight:600;">
-                        <input type="checkbox" id="export-chk-communities" checked style="accent-color:var(--primary); width:17px; height:17px;">
-                        <span>🗺️ Communities</span>
-                        <small style="color:var(--text-muted); font-weight:400; margin-left:4px;">— exports communities.csv</small>
-                    </label>
-
-                    <!-- Sub-options (visible when communities is checked) -->
-                    <div id="export-comm-suboptions" style="padding:12px 16px; border-top:1px solid #e2e8f0; background:white;">
-                        <div style="display:flex; gap:16px; margin-bottom:12px;">
-                            <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.9rem; font-weight:600;">
-                                <input type="radio" name="export-comm-scope" id="export-comm-all" value="all" checked style="accent-color:var(--primary);">
-                                All Communities
-                            </label>
-                            <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.9rem; font-weight:600;">
-                                <input type="radio" name="export-comm-scope" id="export-comm-specific" value="specific" style="accent-color:var(--primary);">
-                                Specific Communities
-                            </label>
-                        </div>
-
-                        <!-- Community checklist (shown only when "specific" is selected) -->
-                        <div id="export-comm-picker" class="hidden" style="display:none;">
-                            <input type="text" id="export-comm-search" placeholder="Search communities…"
-                                style="width:100%; padding:8px 12px; border:1px solid #e2e8f0; border-radius:8px;
-                                       font-size:0.85rem; margin-bottom:8px;">
-                            <div style="display:flex; gap:6px; margin-bottom:8px;">
-                                <button id="export-comm-check-all"   class="toggle-btn-small primary" style="font-size:0.73rem;">Select All</button>
-                                <button id="export-comm-uncheck-all" class="toggle-btn-small"         style="font-size:0.73rem;">Deselect All</button>
-                            </div>
-                            <div id="export-comm-checklist" class="activity-checklist" style="max-height:220px;">
-                                <!-- Populated by JS -->
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="modal-actions" style="margin-top:10px;">
-                <button id="export-modal-cancel" class="toggle-btn" style="margin:0; background:#e2e8f0; color:var(--text-main);">Cancel</button>
-                <button id="export-modal-confirm" class="toggle-btn primary" style="margin:0;">⬇ Download CSV(s)</button>
-            </div>
-        </div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="communities_static.js?v=2"></script>
+    <script src="activities_static.js?v=2"></script>
+    <script src="interventions_static.js?v=2"></script>
     <script src="data.js"></script>
+    <script src="activities.js"></script>
     <script src="app.js"></script>
 
 
