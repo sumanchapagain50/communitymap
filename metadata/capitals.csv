@@ -1,0 +1,6 @@
+Id,Name,Color,Description
+human,Human Capital,#3B82F6,"Skills, knowledge, and health that enable people to work and pursue their goals. Includes education, health access, and labor productivity."
+social,Social Capital,#10B981,"Networks, relationships, and trust that facilitate cooperation and collective action. Includes community groups, social safety nets, and governance."
+physical,Physical Capital,#EF4444,"Basic infrastructure and producer goods needed to support livelihoods. Includes transportation, housing quality, water supply, and energy."
+financial,Financial Capital,#F59E0B,"Financial resources that people use to achieve their livelihood objectives. Includes income stability, access to credit, and savings."
+natural,Natural Capital,#8B5CF6,"Natural resource stocks and ecosystem services from which resource flows and services useful for livelihoods are derived. Includes land quality and resource management."

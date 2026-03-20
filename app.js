@@ -2,89 +2,404 @@
 let isAdmin = false;
 let currentUserRole = null;
 
-// Load saved data
-const savedCommunities = JSON.parse(localStorage.getItem('added_communities_v2') || '[]');
-const savedActivities = JSON.parse(localStorage.getItem('added_activities_v2') || '[]');
+let communitiesData = [];
+let activitiesData = [];
+
+// Load stored/archived IDs
 const archivedCommunityIds = JSON.parse(localStorage.getItem('archived_communities_v2') || '[]');
 const archivedActivityIds = JSON.parse(localStorage.getItem('archived_activities_v2') || '[]');
 
-// Build Data Lists (excluding archived items)
-let communitiesData = [...communities, ...savedCommunities].filter(c => !archivedCommunityIds.includes(c.id));
-let activitiesData = [...activities, ...savedActivities].filter(a => !archivedActivityIds.includes(a.id));
+async function initData() {
+    console.log("Initializing data from CSV...");
 
-// Knowledge Hub State
-let externalKnowledgeLinks = JSON.parse(localStorage.getItem('crmc_external_knowledge') || '[]');
+    // 1. Load All Communities from single compiled CSV
+    try {
+        const commRes = await fetch('communities_all.csv');
+        if (commRes.ok) {
+            const csvText = await commRes.text();
+            const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+            if (parsed.data && parsed.data.length) {
+                const csvComms  = parsed.data.map(row => mapCSVToCommunity(row));
+                const savedComms = JSON.parse(localStorage.getItem('added_communities_v2') || '[]');
 
-// User Management State
-const defaultUsers = [{ name: 'admin', pass: '123', role: 'Admin' }];
-let usersData = [...defaultUsers];
+                // Find conflicts: IDs that appear in BOTH sources
+                const savedMap = new Map(savedComms.map(c => [c.id, c]));
+                const conflicts = csvComms.filter(c => savedMap.has(c.id) && !archivedCommunityIds.includes(c.id));
 
-// Indicator Management State
-let indicatorsData;
-const storedInds = localStorage.getItem('crmc_indicators_v4');
-if (storedInds) {
-    indicatorsData = JSON.parse(storedInds);
-} else {
-    // Initial load: deep clone from staticData.indicators
-    indicatorsData = JSON.parse(JSON.stringify(staticData.indicators));
-    localStorage.setItem('crmc_indicators_v4', JSON.stringify(indicatorsData));
+                if (conflicts.length > 0) {
+                    // Show conflict modal and wait for user decision
+                    const decisions = await resolveConflicts(conflicts, savedMap);
+                    // Apply decisions: build final merged array
+                    const resolvedMap = new Map();
+                    // Start with CSV as base
+                    csvComms.forEach(c => resolvedMap.set(c.id, c));
+                    // Apply per-conflict decisions
+                    decisions.forEach(({ id, keepLocal }) => {
+                        if (keepLocal) resolvedMap.set(id, savedMap.get(id));
+                    });
+                    // Add any locally-added communities that are NOT in CSV at all
+                    savedComms.forEach(c => { if (!resolvedMap.has(c.id)) resolvedMap.set(c.id, c); });
+                    communitiesData = Array.from(resolvedMap.values()).filter(c => !archivedCommunityIds.includes(c.id));
+                } else {
+                    // No conflicts — merge normally (CSV wins for shared IDs on a clean load,
+                    // but saved-only entries are preserved)
+                    const csvMap = new Map(csvComms.map(c => [c.id, c]));
+                    savedComms.forEach(c => { if (!csvMap.has(c.id)) csvMap.set(c.id, c); });
+                    communitiesData = Array.from(csvMap.values()).filter(c => !archivedCommunityIds.includes(c.id));
+                }
+            }
+        } else {
+            throw new Error('communities_all.csv not found');
+        }
+    } catch (e) {
+        console.warn("Could not load communities_all.csv. Falling back to localStorage.", e);
+        communitiesData = JSON.parse(localStorage.getItem('added_communities_v2') || '[]');
+    }
+
+    // 2. Load Activities
+    try {
+        const actRes = await fetch('activity/activities.csv');
+        if (actRes.ok) {
+            const csvText = await actRes.text();
+            const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+            if (parsed.data) {
+                const acts = parsed.data.map(row => mapCSVToActivity(row));
+                const savedActs = JSON.parse(localStorage.getItem('added_activities_v2') || '[]');
+                activitiesData = deduplicateById(acts, savedActs, archivedActivityIds);
+            }
+        }
+    } catch (e) {
+        console.warn("Could not load activities CSV. Falling back to localStorage.", e);
+        activitiesData = JSON.parse(localStorage.getItem('added_activities_v2') || '[]');
+    }
+
+    // Continue initialization
+    finishInit();
 }
 
-// Map Initialization
-const map = L.map('map', {
-    zoomControl: true
-}).setView([27.1, 80.8], 10);
+function mapCSVToCommunity(row) {
+    const comm = {
+        id: row.Id,
+        name: row.Name,
+        country: row.Country,
+        province: row.Province,
+        district: row.District,
+        coords: [parseFloat(row.Lat), parseFloat(row.Lng)],
+        t0_score: parseFloat(row.T0_Score) || 0,
+        t1_score: parseFloat(row.T1_Score) || 0,
+        demographics: {
+            total: parseInt(row.TotalPop) || 0,
+            male: parseInt(row.Male) || 0,
+            female: parseInt(row.Female) || 0,
+            children: parseInt(row.Children) || 0,
+            elderly: parseInt(row.Elderly) || 0,
+            disabilities: parseInt(row.Disabilities) || 0,
+            hhs: parseInt(row.HHs) || 0,
+            description: row.Description
+        },
+        gradings: {}
+    };
+    Object.keys(row).forEach(key => {
+        if (key.endsWith('_t0')) {
+            const indId = key.replace('_t0', '');
+            if (!comm.gradings[indId]) comm.gradings[indId] = {};
+            comm.gradings[indId].t0 = row[key];
+        } else if (key.endsWith('_t1')) {
+            const indId = key.replace('_t1', '');
+            if (!comm.gradings[indId]) comm.gradings[indId] = {};
+            comm.gradings[indId].t1 = row[key];
+        }
+    });
+    return comm;
+}
 
-const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-}).addTo(map);
+function mapCSVToActivity(row) {
+    return {
+        id: row.Id,
+        name: row.Name,
+        indicatorIds: row.IndicatorIds ? row.IndicatorIds.split(';') : [],
+        communityIds: row.CommunityIds ? row.CommunityIds.split(';') : [],
+        knowledgeGenerated: row.KnowledgeGenerated === 'true',
+        beneficiaries: {
+            men: parseInt(row.Men) || 0,
+            women: parseInt(row.Women) || 0,
+            oldMen: parseInt(row.OldMen) || 0,
+            oldWomen: parseInt(row.OldWomen) || 0,
+            newMen: parseInt(row.NewMen) || 0,
+            newWomen: parseInt(row.NewWomen) || 0
+        }
+    };
+}
 
-const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EBP, and the GIS User Community'
-});
+function deduplicateById(baseItems, savedItems, archivedIds) {
+    const map = new Map();
+    baseItems.forEach(i => map.set(i.id, i));
+    savedItems.forEach(i => map.set(i.id, i));
+    return Array.from(map.values()).filter(i => !archivedIds.includes(i.id));
+}
 
-const baseLayers = {
-    "OpenStreetMap": osm,
-    "Satellite": satellite
-};
+/**
+ * Shows the conflict resolution modal and returns a Promise that resolves
+ * with an array of { id, keepLocal } decisions when the user clicks "Apply Choices".
+ */
+function resolveConflicts(conflicts, savedMap) {
+    return new Promise(resolve => {
+        const modal    = document.getElementById('conflict-modal');
+        const listEl   = document.getElementById('conflict-list');
+        const replaceAllBtn = document.getElementById('conflict-replace-all');
+        const keepAllBtn    = document.getElementById('conflict-keep-all');
+        const confirmBtn    = document.getElementById('conflict-confirm');
 
-L.control.layers(baseLayers, null, { position: 'topleft' }).addTo(map);
+        // Build one row per conflict
+        listEl.innerHTML = '';
+        conflicts.forEach(csvComm => {
+            const localComm = savedMap.get(csvComm.id);
+            const row = document.createElement('div');
+            row.style.cssText = 'background:white; border:1px solid #e2e8f0; border-radius:10px; padding:14px; display:flex; flex-direction:column; gap:8px;';
+            row.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+                    <div>
+                        <strong style="color:var(--text-main); font-size:0.95rem;">${csvComm.name}</strong>
+                        <span style="font-size:0.75rem; color:var(--text-muted); margin-left:6px;">${csvComm.id}</span>
+                    </div>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <span style="font-size:0.75rem; color:var(--text-muted);">Use:</span>
+                        <button class="conflict-toggle toggle-btn-small" data-id="${csvComm.id}" data-keep="false"
+                            style="background:var(--primary); color:white; border-color:var(--primary);">CSV</button>
+                        <button class="conflict-toggle toggle-btn-small" data-id="${csvComm.id}" data-keep="true"
+                            style="">Local</button>
+                    </div>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:0.8rem;">
+                    <div style="background:#eff6ff; padding:8px; border-radius:6px;">
+                        <div style="color:var(--primary); font-weight:700; margin-bottom:2px;">📄 CSV Version</div>
+                        <div>T0 Score: <strong>${csvComm.t0_score}</strong></div>
+                        <div style="color:var(--text-muted);">${csvComm.country} · ${csvComm.demographics?.total?.toLocaleString() || '?'} people</div>
+                    </div>
+                    <div style="background:#f0fdf4; padding:8px; border-radius:6px;">
+                        <div style="color:#16a34a; font-weight:700; margin-bottom:2px;">💾 Local Version</div>
+                        <div>T0 Score: <strong>${localComm.t0_score}</strong></div>
+                        <div style="color:var(--text-muted);">${localComm.country} · ${localComm.demographics?.total?.toLocaleString() || '?'} people</div>
+                    </div>
+                </div>
+            `;
+            listEl.appendChild(row);
+        });
 
-// Sidebar Elements
-const sidebar = document.getElementById('sidebar');
-const showBtn = document.getElementById('show-sidebar-btn');
-const hideBtn = document.getElementById('toggle-sidebar');
-const openCompareBtn = document.getElementById('open-compare-btn');
-const exitCompareBtn = document.getElementById('exit-compare-btn');
-const colCompare = document.getElementById('col-compare');
-const compareSelect = document.getElementById('compare-community-select-v2');
+        // Toggle button logic (per row)
+        function updateToggle(id, keepLocal) {
+            listEl.querySelectorAll(`.conflict-toggle[data-id="${id}"]`).forEach(btn => {
+                const isActive = btn.dataset.keep === String(keepLocal);
+                btn.style.background    = isActive ? (keepLocal ? '#16a34a' : 'var(--primary)') : '';
+                btn.style.color         = isActive ? 'white' : '';
+                btn.style.borderColor   = isActive ? (keepLocal ? '#16a34a' : 'var(--primary)') : '';
+            });
+        }
 
-// Admin Elements
-const loginBtn = document.getElementById('admin-login-btn');
-const logoutBtn = document.getElementById('admin-logout-btn');
-const manageActivitiesBtn = document.getElementById('manage-activities-btn');
-const archivedCommunitiesBtn = document.getElementById('archived-communities-btn');
-const loginModal = document.getElementById('login-modal');
-const addCommModal = document.getElementById('add-community-modal');
-const manageActModal = document.getElementById('manage-activities-modal');
-const manageUsersModal = document.getElementById('manage-users-modal');
-const manageIndModal = document.getElementById('manage-indicators-modal');
-const archiveModal = document.getElementById('archive-modal');
-const adminNameInput = document.getElementById('admin-username'); // Note: added in HTML previously or need to check
-const adminPasswordInput = document.getElementById('admin-password');
-const loginError = document.getElementById('login-error');
-const manageUsersBtn = document.getElementById('manage-users-btn');
-const manageIndBtn = document.getElementById('manage-indicators-btn');
-const manageCommunitiesBtn = document.getElementById('manage-communities-btn');
-const manageKnowledgeBtn = document.getElementById('manage-knowledge-btn');
-const manageCommModal = document.getElementById('manage-communities-modal');
-const manageKnowledgeModal = document.getElementById('manage-knowledge-modal');
+        // Initialise all to "CSV" (keepLocal = false)
+        conflicts.forEach(c => updateToggle(c.id, false));
+
+        listEl.addEventListener('click', e => {
+            const btn = e.target.closest('.conflict-toggle');
+            if (!btn) return;
+            const id        = btn.dataset.id;
+            const keepLocal = btn.dataset.keep === 'true';
+            updateToggle(id, keepLocal);
+        });
+
+        // Bulk buttons
+        replaceAllBtn.onclick = () => conflicts.forEach(c => updateToggle(c.id, false));
+        keepAllBtn.onclick    = () => conflicts.forEach(c => updateToggle(c.id, true));
+
+        // Confirm
+        confirmBtn.onclick = () => {
+            const decisions = conflicts.map(c => {
+                const activeBtn = listEl.querySelector(`.conflict-toggle[data-id="${c.id}"][data-keep="true"]`);
+                const keepLocal = activeBtn && activeBtn.style.color === 'white';
+                return { id: c.id, keepLocal };
+            });
+            modal.classList.add('hidden');
+            resolve(decisions);
+        };
+
+        modal.classList.remove('hidden');
+    });
+}
+
+
+// Global state variables
+let externalKnowledgeLinks = JSON.parse(localStorage.getItem('crmc_external_knowledge') || '[]');
+const defaultUsers = [{ name: 'admin', pass: '123', role: 'KRO' }];
+let usersData = JSON.parse(localStorage.getItem('crmc_users') || JSON.stringify(defaultUsers));
+let indicatorsData;
+let countriesData = [];
+const savedCountries = JSON.parse(localStorage.getItem('added_countries_v3') || '[]');
+
+let map;
+let osm;
+let markersGroup;
+const communityMarkers = {};
+
+// UI Handles
+let sidebar, showBtn, hideBtn;
+let communitySelect;
+let loginBtn, logoutBtn, manageActivitiesBtn, archivedCommunitiesBtn, loginModal, addCommModal, manageActModal, manageUsersModal, manageIndModal, archiveModal, adminNameInput, adminPasswordInput, loginError, manageUsersBtn, manageIndBtn, manageCommunitiesBtn, manageKnowledgeBtn, manageCountriesBtn, manageCommModal, manageKnowledgeModal, manageCountriesModal;
+
+
+// Initialize UI Handles immediately (before async data load)
+// This allows top-level event listeners to find their elements.
+function setupUIHandles() {
+    sidebar = document.getElementById('sidebar');
+    showBtn = document.getElementById('show-sidebar-btn');
+    hideBtn = document.getElementById('toggle-sidebar');
+
+    loginBtn = document.getElementById('admin-login-btn');
+    logoutBtn = document.getElementById('admin-logout-btn');
+    manageActivitiesBtn = document.getElementById('manage-activities-btn');
+    archivedCommunitiesBtn = document.getElementById('archived-communities-btn');
+    loginModal = document.getElementById('login-modal');
+    addCommModal = document.getElementById('add-community-modal');
+    manageActModal = document.getElementById('manage-activities-modal');
+    manageUsersModal = document.getElementById('manage-users-modal');
+    manageIndModal = document.getElementById('manage-indicators-modal');
+    archiveModal = document.getElementById('archive-modal');
+    adminNameInput = document.getElementById('admin-username');
+    adminPasswordInput = document.getElementById('admin-password');
+    loginError = document.getElementById('login-error');
+    manageUsersBtn = document.getElementById('manage-users-btn');
+    manageIndBtn = document.getElementById('manage-indicators-btn');
+    manageCommunitiesBtn = document.getElementById('manage-communities-btn');
+    manageKnowledgeBtn = document.getElementById('manage-knowledge-btn');
+    manageCountriesBtn = document.getElementById('manage-countries-btn');
+    manageCommModal = document.getElementById('manage-communities-modal');
+    manageKnowledgeModal = document.getElementById('manage-knowledge-modal');
+    manageCountriesModal = document.getElementById('manage-countries-modal');
+
+    communitySelect = document.getElementById('community-select');
+}
+setupUIHandles();
+
+function saveCountriesToStorage() {
+    const customCountries = countriesData.filter(c => !staticData.countries.some(sc => sc.name === c.name));
+    localStorage.setItem('added_countries_v3', JSON.stringify(customCountries));
+}
+
+function finishInit() {
+    console.log("Finishing initialization...");
+    
+    // Indicators State
+    const storedInds = localStorage.getItem('crmc_indicators_v4');
+    if (storedInds) {
+        indicatorsData = JSON.parse(storedInds);
+    } else {
+        indicatorsData = JSON.parse(JSON.stringify(staticData.indicators));
+        localStorage.setItem('crmc_indicators_v4', JSON.stringify(indicatorsData));
+    }
+
+    // Country State
+    countriesData = [...staticData.countries, ...savedCountries];
+
+    // Map Initialization
+    map = L.map('map', {
+        zoomControl: true
+    }).setView([27.1, 80.8], 10);
+
+    // Google Satellite (Hybrid – includes road/place labels)
+    osm = L.tileLayer('https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+        maxZoom: 20,
+        subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+        attribution: '&copy; <a href="https://maps.google.com">Google Maps</a>'
+    }).addTo(map);
+    markersGroup = L.layerGroup().addTo(map);
+
+    // Initial Rendering
+    populateCountrySelect();
+    renderCountryMarkers();
+    renderColumn(null, 'main');
+    initAccordionToggles();
+    initTabs();
+    setupMapListeners();
+    setupIndicatorFilterListeners();
+    // Community Select listener
+    communitySelect.addEventListener('change', (e) => {
+        const id = e.target.value;
+        if (id === 'All') {
+            onCountrySelection('All');
+        } else {
+            const comm = communitiesData.find(c => c.id === id);
+            if (comm) {
+                // Sync Country Select
+                if (comm.country) {
+                    const countrySelect = document.getElementById('country-select');
+                    if (countrySelect.value !== comm.country) {
+                        countrySelect.value = comm.country;
+                        // Skip re-populating community list to avoid resetting selection
+                        onCountrySelection(comm.country, false); 
+                    }
+                }
+                renderColumn(comm, 'main');
+                if (comm.coords) map.flyTo(comm.coords, 12);
+                
+                // Highlight marker
+                resetHighlights();
+                const marker = communityMarkers[comm.id];
+                if (marker) {
+                    const el = marker.getElement();
+                    if (el) el.classList.add('leaflet-marker-highlighted');
+                }
+                
+                // Reset expansion state for new community
+                expandedCapitals.clear();
+                expandedIndicators.clear();
+            }
+        }
+    });
+}
+
+function setupIndicatorFilterListeners() {
+    const side = 'main';
+    ['flood', 'heat', 'generic'].forEach(type => {
+        const el = document.getElementById(`filter-${type}-${side}`);
+        if (el) {
+            el.addEventListener('change', () => {
+                // Re-render current column
+                const name = document.getElementById('community-name').innerText;
+                const activeComm = communitiesData.find(c => c.name === name) || null;
+                renderColumn(activeComm, side);
+            });
+        }
+    });
+}
+
+function setupMapListeners() {
+    // Override click on map for community addition
+    map.on('click', (e) => {
+        if (isAddingCommunityMode) {
+            const { lat, lng } = e.latlng;
+            isAddingCommunityMode = false;
+            const prompt = document.getElementById('map-click-prompt');
+            if (prompt) {
+                prompt.classList.add('hidden');
+                prompt.style.display = 'none';
+            }
+            openAddCommunityForm(lat, lng);
+        }
+    });
+}
+
+
+// setupUIHandles was moved to top
 
 // Admin Login Logic
 loginBtn.addEventListener('click', () => {
     loginModal.classList.remove('hidden');
     adminPasswordInput.value = '';
     loginError.classList.add('hidden');
+    
+    const userSelect = document.getElementById('admin-username');
+    if (userSelect) {
+        userSelect.innerHTML = usersData.map(u => `<option value="${u.name}">${u.name} (${u.role})</option>`).join('');
+    }
 });
 
 document.getElementById('login-cancel').addEventListener('click', () => {
@@ -113,12 +428,22 @@ document.getElementById('login-submit').addEventListener('click', () => {
             manageKnowledgeBtn.classList.remove('hidden');
             archivedCommunitiesBtn.classList.remove('hidden');
             document.getElementById('kro-dashboard-btn').classList.remove('hidden');
+            document.getElementById('export-data-btn').classList.remove('hidden');
+            document.getElementById('import-data-btn').classList.remove('hidden');
+            manageCountriesBtn.classList.remove('hidden');
+            
+            // Show "Add New Community" in the manager modal
+            const addCommBtn = document.getElementById('trigger-map-add-btn');
+            if (addCommBtn) addCommBtn.classList.remove('hidden');
         } else {
             manageUsersBtn.classList.add('hidden');
             manageIndBtn.classList.add('hidden');
             manageCommunitiesBtn.classList.add('hidden');
             archivedCommunitiesBtn.classList.add('hidden');
             document.getElementById('kro-dashboard-btn').classList.add('hidden');
+            
+            const addCommBtn = document.getElementById('trigger-map-add-btn');
+            if (addCommBtn) addCommBtn.classList.add('hidden');
         }
 
         loginModal.classList.add('hidden');
@@ -147,6 +472,9 @@ logoutBtn.addEventListener('click', () => {
     manageKnowledgeBtn.classList.add('hidden');
     archivedCommunitiesBtn.classList.add('hidden');
     document.getElementById('kro-dashboard-btn').classList.add('hidden');
+    document.getElementById('export-data-btn').classList.add('hidden');
+    document.getElementById('import-data-btn').classList.add('hidden');
+    manageCountriesBtn.classList.add('hidden');
     document.body.classList.remove('admin-mode-active');
     const badge = document.getElementById('admin-badge');
     if (badge) badge.remove();
@@ -154,12 +482,7 @@ logoutBtn.addEventListener('click', () => {
     renderColumn(null, 'main');
 });
 
-// Map Click for Admin (KRO ONLY)
-map.on('click', (e) => {
-    if (!isAdmin || currentUserRole !== 'KRO') return;
-    const { lat, lng } = e.latlng;
-    openAddCommunityForm(lat, lng);
-});
+
 
 function openAddCommunityForm(lat, lng) {
     resetAddCommunityForm();
@@ -185,8 +508,8 @@ function openEditCommunityForm(community) {
     // Pre-fill Demographics
     const d = community.demographics;
     document.getElementById('new-demo-total').value = d.total;
-    document.getElementById('new-demo-men').value = d.men;
-    document.getElementById('new-demo-women').value = d.women;
+    document.getElementById('new-demo-male').value = d.male;
+    document.getElementById('new-demo-female').value = d.female;
     document.getElementById('new-demo-children').value = d.children;
     document.getElementById('new-demo-elderly').value = d.elderly;
     document.getElementById('new-demo-disabilities').value = d.disabilities;
@@ -194,15 +517,13 @@ function openEditCommunityForm(community) {
 
     // Pre-fill Resilience
     document.getElementById('new-score-t0').value = community.t0_score;
-    document.getElementById('new-score-t1').value = community.t1_score;
+    // Note: T1 score is not pre-filled — it will be added manually later
 
-    // Pre-fill Gradings
+    // Pre-fill Gradings (T0 only — T1 will be added manually later)
     if (community.gradings) {
         Object.entries(community.gradings).forEach(([indId, grades]) => {
             const t0sel = document.querySelector(`.grading-input[data-indicator="${indId}"][data-type="t0"]`);
-            const t1sel = document.querySelector(`.grading-input[data-indicator="${indId}"][data-type="t1"]`);
             if (t0sel) t0sel.value = grades.t0;
-            if (t1sel) t1sel.value = grades.t1;
         });
     }
 
@@ -228,8 +549,12 @@ function resetAddCommunityForm() {
             div.innerHTML = `
                 <label style="color: ${cap.color}">${ind.name}</label>
                 <div style="display: flex; gap: 5px;">
-                    <input type="number" class="grading-input" data-indicator="${ind.id}" data-type="t0" min="1" max="100" value="0" placeholder="T0 (1-100)">
-                    <input type="number" class="grading-input" data-indicator="${ind.id}" data-type="t1" min="1" max="100" value="0" placeholder="T1 (1-100)">
+                    <select class="grading-input" data-indicator="${ind.id}" data-type="t0" title="T0 Baseline">
+                        <option value="D">D</option>
+                        <option value="C">C</option>
+                        <option value="B">B</option>
+                        <option value="A">A</option>
+                    </select>
                 </div>
             `;
             grid.appendChild(div);
@@ -314,12 +639,15 @@ document.getElementById('add-comm-submit').addEventListener('click', () => {
     const lng = parseFloat(parts[1]);
     if (isNaN(lat) || isNaN(lng)) return alert('Invalid coordinates. Use format: lat, lng');
 
-    const gradings = {};
+    // Build gradings: start from existing T1 data (if editing) and overwrite T0 from form
+    const editIdForGradings = document.getElementById('edit-comm-id').value;
+    const existingComm = editIdForGradings ? communitiesData.find(c => c.id === editIdForGradings) : null;
+    const gradings = existingComm ? JSON.parse(JSON.stringify(existingComm.gradings || {})) : {};
     document.querySelectorAll('.grading-input').forEach(sel => {
         const indId = sel.dataset.indicator;
-        const type = sel.dataset.type;
+        const type = sel.dataset.type; // only 't0' selects exist now
         if (!gradings[indId]) gradings[indId] = {};
-        gradings[indId][type] = parseInt(sel.value) || 0;
+        gradings[indId][type] = sel.value;
     });
 
     // Collect selected activity IDs
@@ -337,11 +665,11 @@ document.getElementById('add-comm-submit').addEventListener('click', () => {
         country: document.getElementById('new-comm-country').value,
         coords: [lat, lng],
         t0_score: parseInt(document.getElementById('new-score-t0').value) || 0,
-        t1_score: parseInt(document.getElementById('new-score-t1').value) || 0,
+        t1_score: (isEdit && communitiesData.find(c => c.id === editId)) ? (communitiesData.find(c => c.id === editId).t1_score || 0) : 0,
         demographics: {
             total: parseInt(document.getElementById('new-demo-total').value) || 0,
-            men: parseInt(document.getElementById('new-demo-men').value) || 0,
-            women: parseInt(document.getElementById('new-demo-women').value) || 0,
+            male: parseInt(document.getElementById('new-demo-male').value) || 0,
+            female: parseInt(document.getElementById('new-demo-female').value) || 0,
             children: parseInt(document.getElementById('new-demo-children').value) || 0,
             elderly: parseInt(document.getElementById('new-demo-elderly').value) || 0,
             disabilities: parseInt(document.getElementById('new-demo-disabilities').value) || 0,
@@ -384,39 +712,6 @@ document.getElementById('add-comm-submit').addEventListener('click', () => {
     alert(isEdit ? 'Community updated!' : 'Community added!');
 });
 
-// Comparison Toggle
-openCompareBtn.addEventListener('click', () => {
-    sidebar.classList.add('expanded');
-    colCompare.classList.remove('hidden');
-    exitCompareBtn.classList.remove('hidden');
-    openCompareBtn.classList.add('hidden');
-    populateCompareDropdown();
-});
-
-exitCompareBtn.addEventListener('click', () => {
-    sidebar.classList.remove('expanded');
-    colCompare.classList.add('hidden');
-    exitCompareBtn.classList.add('hidden');
-    openCompareBtn.classList.remove('hidden');
-});
-
-function populateCompareDropdown() {
-    compareSelect.innerHTML = '<option value="" disabled selected>Select Community to Compare...</option>';
-    communitiesData.forEach(c => {
-        const opt = document.createElement('option');
-        opt.value = c.id;
-        // Handle duplicate names by adding context
-        const duplicates = communitiesData.filter(oc => oc.name === c.name);
-        opt.innerText = duplicates.length > 1 ? `${c.name} (${c.district}, ${c.country})` : c.name;
-        compareSelect.appendChild(opt);
-    });
-}
-
-compareSelect.addEventListener('change', (e) => {
-    const communityId = e.target.value;
-    const community = communitiesData.find(c => c.id === communityId);
-    if (community) renderColumn(community, 'compare');
-});
 
 // Sidebar Core Toggle
 hideBtn.addEventListener('click', () => {
@@ -430,34 +725,91 @@ showBtn.addEventListener('click', () => {
 });
 
 // Marker Logic
-const markersGroup = L.layerGroup().addTo(map);
-const communityMarkers = {};
+// markersGroup is initialized in finishInit
 
-function renderMarkers(countryFilter = "All") {
+function renderCountryMarkers() {
     markersGroup.clearLayers();
     Object.keys(communityMarkers).forEach(k => delete communityMarkers[k]);
 
-    communitiesData.forEach(community => {
-        if (countryFilter === "All" || community.country === countryFilter) {
-            const marker = L.marker(community.coords);
-            marker.on('click', () => {
-                resetHighlights();
-                renderColumn(community, 'main');
-                sidebar.classList.remove('hidden');
-                showBtn.classList.add('hidden');
-            });
-            markersGroup.addLayer(marker);
-            communityMarkers[community.id] = marker;
-        }
+    countriesData.forEach(country => {
+        const countryCommCount = communitiesData.filter(c => c.country === country.name).length;
+        
+        // Create a custom icon for country markers
+        const countryIcon = L.divIcon({
+            className: 'country-marker-icon',
+            html: `<div class="country-badge">
+                     <span class="country-name">${country.name}</span>
+                     <span class="comm-count">${countryCommCount}</span>
+                   </div>`,
+            iconSize: [60, 40],
+            iconAnchor: [30, 20]
+        });
+
+        const marker = L.marker(country.center, { icon: countryIcon });
+        marker.on('click', () => {
+            onCountrySelection(country.name);
+        });
+        markersGroup.addLayer(marker);
     });
 
-    if (communitiesData.length > 0) {
-        const bounds = L.latLngBounds(communitiesData.map(c => c.coords));
-        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 8 });
+    if (countriesData.length > 0) {
+        const bounds = L.latLngBounds(countriesData.map(c => c.center));
+        map.fitBounds(bounds, { padding: [100, 100], maxZoom: 6 });
     }
 }
-renderMarkers();
-renderColumn(null, 'main');
+
+function onCountrySelection(countryName, repopulateCommunities = true) {
+    const select = document.getElementById('country-select');
+    select.value = countryName;
+    
+    if (repopulateCommunities) {
+        populateCommunitySelect(countryName);
+    }
+
+    if (countryName === "All") {
+        renderCountryMarkers();
+        resetHighlights();
+        renderColumn(null, 'main');
+    } else {
+        renderMarkers(countryName);
+        resetHighlights();
+        const country = countriesData.find(c => c.name === countryName);
+        if (country && repopulateCommunities) {
+            map.flyTo(country.center, country.zoom || 8);
+        }
+    }
+}
+
+function renderMarkers(countryFilter = "All") {
+    if (countryFilter === "All") {
+        renderCountryMarkers();
+        return;
+    }
+
+    markersGroup.clearLayers();
+    Object.keys(communityMarkers).forEach(k => delete communityMarkers[k]);
+
+    const filteredComms = communitiesData.filter(c => c.country === countryFilter);
+
+    filteredComms.forEach(community => {
+        const marker = L.marker(community.coords);
+        marker.on('click', () => {
+            resetHighlights();
+            renderColumn(community, 'main');
+            sidebar.classList.remove('hidden');
+            showBtn.classList.add('hidden');
+        });
+        markersGroup.addLayer(marker);
+        communityMarkers[community.id] = marker;
+    });
+
+    if (filteredComms.length > 0) {
+        const bounds = L.latLngBounds(filteredComms.map(c => c.coords));
+        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 10 });
+    }
+}
+
+// Initial Map Load (handled in finishInit)
 
 function resetHighlights() {
     Object.values(communityMarkers).forEach(m => {
@@ -484,22 +836,45 @@ function highlightCommunities(communityIds) {
 }
 
 document.getElementById('country-select').addEventListener('change', (e) => {
-    const filter = e.target.value;
-    renderMarkers(filter);
-    resetHighlights();
-    renderColumn(null, 'main'); // Render global view
-    if (filter === "All") {
-        if (communitiesData.length > 0) {
-            const bounds = L.latLngBounds(communitiesData.map(c => c.coords));
-            map.fitBounds(bounds, { padding: [50, 50], maxZoom: 8 });
-        } else {
-            map.setView([28.6, 80.8], 8);
-        }
-    } else {
-        const c = staticData.countries.find(x => x.name === filter);
-        if (c) map.setView(c.center, c.zoom);
-    }
+    onCountrySelection(e.target.value);
 });
+
+function populateCountrySelect() {
+    const selects = [
+        document.getElementById('country-select'),
+        document.getElementById('new-comm-country'),
+        document.getElementById('dash-filter-country')
+    ];
+
+    selects.forEach(sel => {
+        if (!sel) return;
+        const isFilter = sel.id === 'country-select' || sel.id === 'dash-filter-country';
+        let html = isFilter ? '<option value="All">All Countries</option>' : '';
+        countriesData.forEach(c => {
+            html += `<option value="${c.name}">${c.name}</option>`;
+        });
+        sel.innerHTML = html;
+    });
+
+    // Also populate community select for the current initial country
+    const country = document.getElementById('country-select').value;
+    populateCommunitySelect(country);
+}
+
+function populateCommunitySelect(countryFilter = "All") {
+    if (!communitySelect) return;
+    
+    let filtered = communitiesData;
+    if (countryFilter !== "All") {
+        filtered = communitiesData.filter(c => c.country === countryFilter);
+    }
+
+    let html = '<option value="All">All Communities</option>';
+    filtered.sort((a,b) => a.name.localeCompare(b.name)).forEach(c => {
+        html += `<option value="${c.id}">${c.name}</option>`;
+    });
+    communitySelect.innerHTML = html;
+}
 
 // Tab Logic
 function initTabs() {
@@ -518,88 +893,75 @@ function initTabs() {
         });
     });
 }
-initTabs();
 
 // State
-let needleAngles = { main: { t0: 0, t1: 0 }, compare: { t0: 0, t1: 0 } };
-let animFrames = { main: null, compare: null };
-let accordionState = { main: true, compare: true };
+let needleAngles = { main: { t0: 0, t1: 0 } };
+let animFrames = { main: null };
+let accordionState = { main: true };
+let expandedCapitals = new Set();
+let expandedIndicators = new Set();
 
 // Accordion Toggle Listeners
 function initAccordionToggles() {
-    ['main', 'compare'].forEach(side => {
-        const btn = document.getElementById(`accordion-toggle-${side}`);
-        if (btn) {
-            btn.addEventListener('click', () => {
-                accordionState[side] = !accordionState[side];
-                btn.innerText = `Accordion: ${accordionState[side] ? 'ON' : 'OFF'}`;
-                btn.classList.toggle('active');
-            });
-        }
-    });
+    const side = 'main';
+    const btn = document.getElementById(`accordion-toggle-${side}`);
+    if (btn) {
+        btn.addEventListener('click', () => {
+            accordionState[side] = !accordionState[side];
+            btn.innerText = `Accordion: ${accordionState[side] ? 'ON' : 'OFF'}`;
+            btn.classList.toggle('active');
+        });
+    }
 }
-initAccordionToggles();
 
 // Toggle Display Listeners (T0/T1)
-['main', 'compare'].forEach(side => {
-    ['t0', 't1'].forEach(type => {
-        const el = document.getElementById(`show-${type}-${side}`);
-        if (el) {
-            el.addEventListener('change', () => {
-                // Determine which community is currently active in this column
-                let activeComm = null;
-                if (side === 'main') {
-                    const name = document.getElementById('community-name').innerText;
-                    activeComm = communitiesData.find(c => c.name === name) || null;
-                } else {
-                    const id = compareSelect.value;
-                    activeComm = communitiesData.find(c => c.id === id) || null;
-                }
-                renderColumn(activeComm, side);
-            });
-        }
-    });
+const side = 'main';
+['t0', 't1'].forEach(type => {
+    const el = document.getElementById(`show-${type}-${side}`);
+    if (el) {
+        el.addEventListener('change', () => {
+            // Determine which community is currently active
+            const name = document.getElementById('community-name').innerText;
+            const activeComm = communitiesData.find(c => c.name === name) || null;
+            renderColumn(activeComm, side);
+        });
+    }
 });
 
 function renderColumn(community, colType) {
-    if (colType === 'main') {
-        const title = community ? community.name : "Global Overview";
-        document.getElementById('community-name').innerText = title;
-
-        // Inject Edit button if admin is logged in (KRO ONLY) and a community is selected
-        const editArea = document.getElementById('admin-edit-area');
-        editArea.innerHTML = '';
-        if (isAdmin && currentUserRole === 'KRO' && community) {
-            const editBtn = document.createElement('button');
-            editBtn.className = 'toggle-btn-small';
-            editBtn.style.marginTop = '8px';
-            editBtn.innerText = '✏️ Edit Community';
-            editBtn.onclick = () => openEditCommunityForm(community);
-            editArea.appendChild(editBtn);
-        }
-
-        const gaugeGroup = document.getElementById('gauge-group-main');
-        if (community) {
-            gaugeGroup.classList.remove('hidden');
-            animateGauge(community.t0_score, community.t1_score, 'gauge-canvas-main', 'main');
-        } else {
-            gaugeGroup.classList.add('hidden');
-        }
-
-        renderDemographics(community, 'demographics-text-main');
-        renderActivities(community, 'activities-list-main');
-        renderKnowledge(community, 'knowledge-list-main');
-        renderCapitals(community, 'capitals-container-main', 'main');
-    } else {
-        if (!community) return;
-        document.getElementById('compare-community-name').innerText = community.name;
-        document.getElementById('gauge-group-compare').classList.remove('hidden');
-        renderDemographics(community, 'demographics-text-compare');
-        renderActivities(community, 'activities-list-compare');
-        renderKnowledge(community, 'knowledge-list-compare');
-        animateGauge(community.t0_score, community.t1_score, 'gauge-canvas-compare', 'compare');
-        renderCapitals(community, 'capitals-container-compare', 'compare');
+    const title = community ? community.name : "Global Overview";
+    document.getElementById('community-name').innerText = title;
+    
+    // Sync community select
+    if (communitySelect) {
+        communitySelect.value = community ? community.id : "All";
     }
+
+    // Inject Edit button if admin is logged in (KRO ONLY) and a community is selected
+    const editArea = document.getElementById('admin-edit-area');
+    editArea.innerHTML = '';
+    if (isAdmin && currentUserRole === 'KRO' && community) {
+        const editBtn = document.createElement('button');
+        editBtn.className = 'toggle-btn-small';
+        editBtn.style.marginTop = '8px';
+        editBtn.innerText = '✏️ Edit Community';
+        editBtn.onclick = () => openEditCommunityForm(community);
+        editArea.appendChild(editBtn);
+    }
+
+    const gaugeGroup = document.getElementById('gauge-group-main');
+    if (community) {
+        gaugeGroup.classList.remove('hidden');
+        animateGauge(community.t0_score, community.t1_score, 'gauge-canvas-main', 'main');
+    } else {
+        gaugeGroup.classList.add('hidden');
+    }
+
+    const countryFilter = document.getElementById('country-select') ? document.getElementById('country-select').value : 'All';
+    renderDemographics(community, 'demographics-text-main');
+    renderActivities(community, 'activities-list-main', countryFilter);
+    renderKnowledge(community, 'knowledge-list-main');
+    renderCapitals(community, 'capitals-container-main', 'main');
 }
 
 function renderKnowledge(community, targetId) {
@@ -627,7 +989,16 @@ function renderKnowledge(community, targetId) {
             li.innerHTML = `<strong>${name}</strong><br><small>Knowledge Instances: ${times}</small>${linkHtml}`;
             list.appendChild(li);
         });
-        if (list.innerHTML === '') list.innerHTML = '<li class="form-hint">No knowledge-generating activities recorded for this community.</li>';
+
+        const extLinks = externalKnowledgeLinks.filter(l => l.communityIds && l.communityIds.includes(community.id));
+        extLinks.forEach(link => {
+            const li = document.createElement('li');
+            const linkHtml = link.url ? `<br><a href="${link.url}" target="_blank" style="color:var(--primary); font-size:0.8rem;">View Resource</a>` : '';
+            li.innerHTML = `<strong>${link.title}</strong><br><small>Added Knowledge</small>${linkHtml}`;
+            list.appendChild(li);
+        });
+
+        if (list.innerHTML === '') list.innerHTML = '<li class="form-hint">No knowledge resources recorded for this community.</li>';
     } else {
         // Global Knowledge Hub: Confirmed activities + External links
         const confirmedActs = activitiesData.filter(a => a.knowledgeGenerated && a.knowledgeConfirmed);
@@ -691,13 +1062,13 @@ function renderDemographics(community, targetId) {
         d = filtered.reduce((acc, curr) => {
             const cd = curr.demographics;
             acc.total += (cd.total || 0);
-            acc.men += (cd.men || 0);
-            acc.women += (cd.women || 0);
+            acc.male += (cd.male || 0);
+            acc.female += (cd.female || 0);
             acc.children += (cd.children || 0);
             acc.elderly += (cd.elderly || 0);
             acc.disabilities += (cd.disabilities || 0);
             return acc;
-        }, { total: 0, men: 0, women: 0, children: 0, elderly: 0, disabilities: 0 });
+        }, { total: 0, male: 0, female: 0, children: 0, elderly: 0, disabilities: 0 });
 
         d.description = `Aggregate data across ${filtered.length} communities in ${currentCountry === "All" ? "all regions" : currentCountry}.`;
         title = `Total Demographics (${currentCountry})`;
@@ -707,8 +1078,8 @@ function renderDemographics(community, targetId) {
         <h3 style="margin-bottom: 15px; font-size: 0.9rem; color: var(--primary); text-transform: uppercase; letter-spacing: 0.05em;">${title}</h3>
         <div class="demo-grid">
             <div class="demo-item"><i data-lucide="users"></i> <div><span class="demo-label">Total</span><span class="demo-value">${d.total.toLocaleString()}</span></div></div>
-            <div class="demo-item"><i data-lucide="user"></i> <div><span class="demo-label">men</span><span class="demo-value">${d.men.toLocaleString()}</span></div></div>
-            <div class="demo-item"><i data-lucide="user-plus"></i> <div><span class="demo-label">women</span><span class="demo-value">${d.women.toLocaleString()}</span></div></div>
+            <div class="demo-item"><i data-lucide="user"></i> <div><span class="demo-label">Male</span><span class="demo-value">${d.male.toLocaleString()}</span></div></div>
+            <div class="demo-item"><i data-lucide="user-plus"></i> <div><span class="demo-label">Female</span><span class="demo-value">${d.female.toLocaleString()}</span></div></div>
             <div class="demo-item"><i data-lucide="baby"></i> <div><span class="demo-label">Children</span><span class="demo-value">${d.children.toLocaleString()}</span></div></div>
             <div class="demo-item"><i data-lucide="accessibility"></i> <div><span class="demo-label">Elderly</span><span class="demo-value">${d.elderly.toLocaleString()}</span></div></div>
             <div class="demo-item"><i data-lucide="contact"></i> <div><span class="demo-label">Disabilities</span><span class="demo-value">${d.disabilities.toLocaleString()}</span></div></div>
@@ -749,22 +1120,71 @@ function renderActivities(community, targetId, countryFilter = "All") {
                 });
 
             if (filteredCommIds.length > 0) {
-                if (!uniqueActs.find(x => x.name === a.name)) {
-                    uniqueActs.push({ name: a.name, communityIds: [...filteredCommIds] });
-                } else {
-                    const existing = uniqueActs.find(x => x.name === a.name);
-                    filteredCommIds.forEach(id => {
-                        if (!existing.communityIds.includes(id)) existing.communityIds.push(id);
-                    });
+                let existing = uniqueActs.find(x => x.name === a.name);
+                if (!existing) {
+                    existing = { name: a.name, instances: [] };
+                    uniqueActs.push(existing);
                 }
+                
+                filteredCommIds.forEach(id => {
+                    const comm = communitiesData.find(c => c.id === id);
+                    if (comm) {
+                        let inst = existing.instances.find(i => i.commId === id);
+                        if (!inst) {
+                            inst = {
+                                commId: id,
+                                commName: comm.name,
+                                periods: []
+                            };
+                            existing.instances.push(inst);
+                        }
+                        const time = (a.year && a.quarter) ? `${a.year}-Q${a.quarter}` : 'N/A';
+                        if (!inst.periods.includes(time)) inst.periods.push(time);
+                    }
+                });
             }
         });
 
         uniqueActs.forEach(act => {
             const li = document.createElement('li');
             li.className = 'activity-item-global';
-            li.innerHTML = `<strong>${act.name}</strong><small>Undertaken in ${act.communityIds.length} communities</small>`;
-            li.onclick = () => highlightCommunities(act.communityIds);
+            
+            li.innerHTML = `
+                <div class="activity-header-global">
+                    <div>
+                        <strong>${act.name}</strong>
+                        <small>Undertaken in ${act.instances.length} communities</small>
+                    </div>
+                    <span class="chevron">▼</span>
+                </div>
+                <div class="activity-details-global hidden">
+                    <ul class="community-instance-list">
+                        ${act.instances.map(inst => `
+                            <li>
+                                <span>${inst.commName}</span>
+                                <small>${inst.periods.sort().join(', ')}</small>
+                            </li>
+                        `).join('')}
+                    </ul>
+                </div>
+            `;
+            
+            li.onclick = () => {
+                const details = li.querySelector('.activity-details-global');
+                const isHidden = details.classList.contains('hidden');
+                
+                // Collapse all others if needed (optional, following accordion pattern)
+                list.querySelectorAll('.activity-details-global').forEach(d => d.classList.add('hidden'));
+                list.querySelectorAll('.activity-item-global').forEach(item => item.classList.remove('expanded'));
+
+                if (isHidden) {
+                    details.classList.remove('hidden');
+                    li.classList.add('expanded');
+                    highlightCommunities(act.instances.map(i => i.commId));
+                } else {
+                    resetHighlights();
+                }
+            };
             list.appendChild(li);
         });
     }
@@ -844,23 +1264,49 @@ function renderCapitals(community, containerId, side) {
         return;
     }
 
+    const showT0 = document.getElementById(`show-t0-${side}`).checked;
+    const showT1 = document.getElementById(`show-t1-${side}`).checked;
+
+    const filterFlood = document.getElementById(`filter-flood-${side}`).checked;
+    const filterHeat = document.getElementById(`filter-heat-${side}`).checked;
+    const filterGeneric = document.getElementById(`filter-generic-${side}`).checked;
+
     staticData.capitals.forEach(cap => {
         const capDiv = document.createElement('div');
         capDiv.className = 'capital-item';
-        const indList = indicatorsData[cap.id] || [];
+        let indList = indicatorsData[cap.id] || [];
+
+        // Check if this capital should be expanded
+        const isCapExpanded = expandedCapitals.has(cap.id);
+        indList = indList.filter(ind => {
+            if (ind.type === "Flood") return filterFlood;
+            if (ind.type === "Heat") return filterHeat;
+            if (ind.type === "Generic") return filterGeneric;
+            return true;
+        });
+
+        if (indList.length === 0) return; // Skip capital if no indicators match filter
+
         let degraded = indList.some(i => {
             const g = community.gradings[i.id];
-            return g && Number(g.t1) < Number(g.t0);
+            return g && g.t1 > g.t0; // A is best, t1 > t0 signifies degradation
         });
-        if (degraded) capDiv.classList.add('capital-degraded');
-        capDiv.innerHTML = `<div class="capital-header" style="background: ${cap.color}"><span>${cap.name}</span><span class="chevron">▼</span></div><div class="indicators-list"></div>`;
+        if (degraded && showT0 && showT1) capDiv.classList.add('capital-degraded');
+        capDiv.innerHTML = `<div class="capital-header" style="background: ${cap.color}"><span>${cap.name}</span><span class="chevron">${isCapExpanded ? '▲' : '▼'}</span></div><div class="indicators-list" style="display: ${isCapExpanded ? 'block' : 'none'}"></div>`;
         const list = capDiv.querySelector('.indicators-list');
 
         indList.forEach(ind => {
             const grad = community.gradings[ind.id];
-            const isDeg = grad ? Number(grad.t1) < Number(grad.t0) : false;
+            const isDeg = grad ? grad.t1 > grad.t0 : false;
             const indDiv = document.createElement('div');
-            indDiv.className = `indicator-item ${isDeg ? 'indicator-degraded' : ''}`;
+            
+            // Apply background color class based on type
+            let typeClass = "";
+            if (ind.type === "Flood") typeClass = "indicator-flood-bg";
+            else if (ind.type === "Heat") typeClass = "indicator-heat-bg";
+            else if (ind.type === "Generic") typeClass = "indicator-generic-bg";
+
+            indDiv.className = `indicator-item ${typeClass} ${isDeg && showT0 && showT1 ? 'indicator-degraded' : ''}`;
             const related = activitiesData.filter(a => a.communityIds.includes(community.id) && a.indicatorIds.includes(ind.id));
             
             // Group activities by name
@@ -879,46 +1325,64 @@ function renderCapitals(community, containerId, side) {
                 }).join('') 
                 : '<li>No specific activities recorded</li>';
             
-            const showT0 = document.getElementById(`show-t0-${side}`).checked;
-            const showT1 = document.getElementById(`show-t1-${side}`).checked;
-
             const t0Text = showT0 ? `T0: ${grad ? grad.t0 : 'N/A'}` : '';
             const t1Text = showT1 ? `T1: ${grad ? grad.t1 : 'N/A'}` : '';
             const arrow = (showT0 && showT1) ? ' <span class="arrow">→</span> ' : '';
 
+            const isIndExpanded = expandedIndicators.has(ind.id);
             indDiv.innerHTML = `
                 <div class="indicator-header"><span>${ind.name}</span><span class="${isDeg && showT0 && showT1 ? 'grade-degraded' : ''}">${t0Text}${arrow}${t1Text}</span></div>
-                <div class="activity-sublist"><strong>Contributing Activities:</strong><ul>${relatedHtml}</ul></div>
+                <div class="activity-sublist" style="display: ${isIndExpanded ? 'block' : 'none'}"><strong>Contributing Activities:</strong><ul>${relatedHtml}</ul></div>
             `;
 
             indDiv.onclick = (e) => {
                 e.stopPropagation();
                 const sub = indDiv.querySelector('.activity-sublist');
-                const isCurrentlyVisible = sub.style.display === 'block';
+                const isNowVisible = sub.style.display !== 'block';
 
                 if (accordionState[side]) {
                     // Accordion: Collapse all other indicators in this capital
                     list.querySelectorAll('.activity-sublist').forEach(s => s.style.display = 'none');
+                    // We don't necessarily clear all from the Set because they might be in other capitals
+                    // but for pure accordion in one list, it's fine.
                 }
 
                 // Toggle current
-                sub.style.display = isCurrentlyVisible ? 'none' : 'block';
+                if (isNowVisible) {
+                    sub.style.display = 'block';
+                    expandedIndicators.add(ind.id);
+                } else {
+                    sub.style.display = 'none';
+                    expandedIndicators.delete(ind.id);
+                }
             };
             list.appendChild(indDiv);
         });
 
         capDiv.querySelector('.capital-header').onclick = () => {
-            const isCurrentlyVisible = list.style.display === 'block';
+            const isNowVisible = list.style.display !== 'block';
 
             if (accordionState[side]) {
                 // Accordion: Collapse all other capitals in this container
-                container.querySelectorAll('.indicators-list').forEach(l => l.style.display = 'none');
-                container.querySelectorAll('.chevron').forEach(c => c.innerText = '▼');
+                container.querySelectorAll('.indicators-list').forEach(l => {
+                    if (l !== list) l.style.display = 'none';
+                });
+                container.querySelectorAll('.chevron').forEach(c => {
+                    if (c !== capDiv.querySelector('.chevron')) c.innerText = '▼';
+                });
+                expandedCapitals.clear(); // Clear all if accordion is ON
             }
 
             // Toggle current
-            list.style.display = isCurrentlyVisible ? 'none' : 'block';
-            capDiv.querySelector('.chevron').innerText = isCurrentlyVisible ? '▼' : '▲';
+            if (isNowVisible) {
+                list.style.display = 'block';
+                capDiv.querySelector('.chevron').innerText = '▲';
+                expandedCapitals.add(cap.id);
+            } else {
+                list.style.display = 'none';
+                capDiv.querySelector('.chevron').innerText = '▼';
+                expandedCapitals.delete(cap.id);
+            }
         };
         container.appendChild(capDiv);
     });
@@ -1004,7 +1468,7 @@ function renderManageCommunitiesList() {
             </div>
             <div style="display:flex; gap:8px;">
                 <button class="toggle-btn-small" onclick="openEditCommunityFormById('${c.id}')">Edit</button>
-                <button class="toggle-btn-small danger-small" onclick="permanentlyDeleteCommunity('${c.id}')">Archive</button>
+                <button class="toggle-btn-small danger-small" onclick="archiveCommunity('${c.id}')">Archive</button>
             </div>
         `;
         listEl.appendChild(item);
@@ -1018,6 +1482,19 @@ window.openEditCommunityFormById = function(id) {
         manageCommModal.classList.add('hidden');
         openEditCommunityForm(comm);
     }
+};
+
+window.archiveCommunity = function(id) {
+    if (!confirm('Are you sure you want to archive this community?')) return;
+    if (!archivedCommunityIds.includes(id)) {
+        archivedCommunityIds.push(id);
+        localStorage.setItem('archived_communities_v2', JSON.stringify(archivedCommunityIds));
+    }
+    communitiesData = communitiesData.filter(c => c.id !== id);
+    renderManageCommunitiesList();
+    renderMarkers(document.getElementById('country-select') ? document.getElementById('country-select').value : 'All');
+    populateCompareDropdown();
+    renderColumn(null, 'main');
 };
 
 // Manage Activities Modal
@@ -1129,7 +1606,7 @@ function clearActivityForm() {
     document.getElementById('act-year-input').value = '';
     document.getElementById('act-quarter-input').value = 'Q1';
     document.getElementById('act-knowledge-input').checked = false;
-    document.querySelectorAll('.act-ben-men, .act-ben-women, .act-ben-oldParticipantMen, .act-ben-oldParticipantWomen, .act-ben-newParticipantMen, .act-ben-newParticipantWomen').forEach(input => input.value = 0);
+    document.querySelectorAll('.act-ben-men, .act-ben-women, .act-ben-oldMen, .act-ben-oldWomen, .act-ben-newMen, .act-ben-newWomen').forEach(input => input.value = 0);
     document.querySelectorAll('.act-comm-cb, .act-ind-cb').forEach(cb => cb.checked = false);
 }
 
@@ -1149,10 +1626,10 @@ document.getElementById('save-activity-btn').addEventListener('click', () => {
     const ben = {
         men: parseInt(document.getElementById('act-ben-men').value) || 0,
         women: parseInt(document.getElementById('act-ben-women').value) || 0,
-        oldParticipantMen: parseInt(document.getElementById('act-ben-oldParticipantMen').value) || 0,
-        oldParticipantWomen: parseInt(document.getElementById('act-ben-oldParticipantWomen').value) || 0,
-        newParticipantMen: parseInt(document.getElementById('act-ben-newParticipantMen').value) || 0,
-        newParticipantWomen: parseInt(document.getElementById('act-ben-newParticipantWomen').value) || 0
+        oldMen: parseInt(document.getElementById('act-ben-oldMen').value) || 0,
+        oldWomen: parseInt(document.getElementById('act-ben-oldWomen').value) || 0,
+        newMen: parseInt(document.getElementById('act-ben-newMen').value) || 0,
+        newWomen: parseInt(document.getElementById('act-ben-newWomen').value) || 0
     };
 
     const editId = document.getElementById('act-edit-id').value;
@@ -1213,19 +1690,64 @@ document.getElementById('know-tab-links').addEventListener('click', () => {
     updateKnowModalTabs();
 });
 
+document.getElementById('know-tab-add').addEventListener('click', () => {
+    knowModalTab = 'add';
+    updateKnowModalTabs();
+    populateKnowChecklists();
+});
+
 function updateKnowModalTabs() {
     document.getElementById('know-tab-verify').classList.toggle('active', knowModalTab === 'verify');
     document.getElementById('know-tab-links').classList.toggle('active', knowModalTab === 'links');
+    document.getElementById('know-tab-add').classList.toggle('active', knowModalTab === 'add');
+    
     document.getElementById('know-verify-section').classList.toggle('hidden', knowModalTab !== 'verify');
     document.getElementById('know-links-section').classList.toggle('hidden', knowModalTab !== 'links');
+    document.getElementById('know-add-section').classList.toggle('hidden', knowModalTab !== 'add');
+    
     if (knowModalTab === 'verify') renderKnowVerifyList();
-    else renderExtKnowList();
+    else if (knowModalTab === 'links') renderExtKnowList();
 }
 
 function openManageKnowledgeModal() {
     knowModalTab = 'verify';
     updateKnowModalTabs();
     manageKnowledgeModal.classList.remove('hidden');
+}
+
+function populateKnowChecklists() {
+    // Communities
+    const commList = document.getElementById('know-community-checklist');
+    commList.innerHTML = '';
+    communitiesData.forEach(c => {
+        const lbl = document.createElement('label');
+        lbl.className = 'check-label';
+        lbl.innerHTML = `<input type="checkbox" class="know-comm-cb" value="${c.id}"> ${c.name} (${c.country})`;
+        commList.appendChild(lbl);
+    });
+
+    // Activities
+    const actList = document.getElementById('know-activity-checklist');
+    actList.innerHTML = '';
+    activitiesData.forEach(a => {
+        const lbl = document.createElement('label');
+        lbl.className = 'check-label';
+        lbl.innerHTML = `<input type="checkbox" class="know-act-cb" value="${a.id}"> ${a.name}`;
+        actList.appendChild(lbl);
+    });
+
+    // Indicators
+    const indList = document.getElementById('know-indicator-checklist');
+    indList.innerHTML = '';
+    staticData.capitals.forEach(cap => {
+        const inds = indicatorsData[cap.id] || [];
+        inds.forEach(ind => {
+            const lbl = document.createElement('label');
+            lbl.className = 'check-label';
+            lbl.innerHTML = `<input type="checkbox" class="know-ind-cb" value="${ind.id}"> <span style="color:${cap.color}">${cap.name}: ${ind.name}</span>`;
+            indList.appendChild(lbl);
+        });
+    });
 }
 
 function renderKnowVerifyList() {
@@ -1299,18 +1821,29 @@ function renderExtKnowList() {
 document.getElementById('save-ext-know-btn').addEventListener('click', () => {
     const title = document.getElementById('ext-know-title').value.trim();
     const url = document.getElementById('ext-know-url').value.trim();
+    if (!title) return alert('Please enter at least a title.');
+
+    const selectedComms = Array.from(document.querySelectorAll('.know-comm-cb:checked')).map(cb => cb.value);
+    const selectedActs = Array.from(document.querySelectorAll('.know-act-cb:checked')).map(cb => cb.value);
+    const selectedInds = Array.from(document.querySelectorAll('.know-ind-cb:checked')).map(cb => cb.value);
     
-    if (!title || !url) return alert('Please enter both title and URL.');
-    
-    externalKnowledgeLinks.push({ title, url });
+    externalKnowledgeLinks.push({ 
+        title, 
+        url, 
+        communityIds: selectedComms,
+        activityIds: selectedActs, 
+        indicatorIds: selectedInds
+    });
     localStorage.setItem('crmc_external_knowledge', JSON.stringify(externalKnowledgeLinks));
     
     document.getElementById('ext-know-title').value = '';
     document.getElementById('ext-know-url').value = '';
+    document.querySelectorAll('.know-comm-cb, .know-act-cb, .know-ind-cb').forEach(cb => cb.checked = false);
     
-    renderExtKnowList();
+    alert('Knowledge added!');
+    knowModalTab = 'links';
+    updateKnowModalTabs();
     renderColumn(null, 'main');
-    alert('External link added!');
 });
 
 window.deleteExtKnow = function(idx) {
@@ -1578,8 +2111,9 @@ function renderIndicatorsList() {
         inds.forEach(ind => {
             const item = document.createElement('div');
             item.className = 'manage-act-item';
+            const typeLabel = ind.type ? `<small style="margin-left:8px; opacity:0.6;">(${ind.type})</small>` : '';
             item.innerHTML = `
-                <div>${ind.name}</div>
+                <div>${ind.name} ${typeLabel}</div>
                 <div style="display:flex; gap:8px;">
                     <button class="toggle-btn-small" onclick="editIndicatorInModal('${cap.id}', '${ind.id}')">Edit</button>
                     <button class="toggle-btn-small danger-small" onclick="deleteIndicator('${cap.id}', '${ind.id}')">Remove</button>
@@ -1596,7 +2130,8 @@ window.editIndicatorInModal = function(capId, indId) {
     document.getElementById('ind-edit-id').value = ind.id;
     document.getElementById('ind-name-input').value = ind.name;
     document.getElementById('ind-capital-input').value = capId;
-    document.getElementById('ind-capital-input').disabled = true; // Don't allow changing capital during edit for data integrity
+    document.getElementById('ind-type-input').value = ind.type || 'Generic';
+    document.getElementById('ind-capital-input').disabled = false; // Allow changing capital
 };
 
 document.getElementById('clear-ind-form-btn').addEventListener('click', () => {
@@ -1612,27 +2147,47 @@ function clearIndForm() {
 document.getElementById('save-indicator-btn').addEventListener('click', () => {
     const name = document.getElementById('ind-name-input').value.trim();
     const capId = document.getElementById('ind-capital-input').value;
+    const type = document.getElementById('ind-type-input').value;
     const editId = document.getElementById('ind-edit-id').value;
 
     if (!name) return alert('Indicator name is required.');
 
     if (editId) {
-        // Edit existing
-        const idx = indicatorsData[capId].findIndex(i => i.id === editId);
-        if (idx !== -1) {
-            indicatorsData[capId][idx].name = name;
+        // Find existing indicator and its current capital
+        let oldCapId = null;
+        let indObj = null;
+        for (const cid in indicatorsData) {
+            const idx = indicatorsData[cid].findIndex(i => i.id === editId);
+            if (idx !== -1) {
+                oldCapId = cid;
+                indObj = indicatorsData[cid][idx];
+                break;
+            }
+        }
+
+        if (indObj) {
+            indObj.name = name;
+            indObj.type = type;
+
+            if (oldCapId !== capId) {
+                // Move indicator to new capital
+                indicatorsData[oldCapId] = indicatorsData[oldCapId].filter(i => i.id !== editId);
+                if (!indicatorsData[capId]) indicatorsData[capId] = [];
+                indicatorsData[capId].push(indObj);
+            }
         }
     } else {
         // Add new
-        const newInd = { id: 'ind_' + Date.now(), name: name };
+        const newInd = { id: 'ind_' + Date.now(), name: name, type: type };
         if (!indicatorsData[capId]) indicatorsData[capId] = [];
         indicatorsData[capId].push(newInd);
     }
     
-    localStorage.setItem('crmc_indicators_v3', JSON.stringify(indicatorsData));
+    localStorage.setItem('crmc_indicators_v4', JSON.stringify(indicatorsData));
     
     clearIndForm();
     renderIndicatorsList();
+    renderColumn(null, 'main'); // Refresh the view if currently open
     alert(editId ? 'Indicator updated!' : 'Indicator added!');
 });
 
@@ -1640,9 +2195,129 @@ window.deleteIndicator = function(capId, indId) {
     if (!confirm('Are you sure you want to remove this indicator? Data already assigned to this indicator in communities will persist but the indicator name may show as N/A.')) return;
     
     indicatorsData[capId] = indicatorsData[capId].filter(i => i.id !== indId);
-    localStorage.setItem('crmc_indicators_v3', JSON.stringify(indicatorsData));
+    localStorage.setItem('crmc_indicators_v4', JSON.stringify(indicatorsData));
     
     renderIndicatorsList();
+};
+
+// ===== COUNTRY MANAGEMENT =====
+manageCountriesBtn.addEventListener('click', () => {
+    clearCountryForm();
+    renderCountriesList();
+    manageCountriesModal.classList.remove('hidden');
+});
+
+document.getElementById('close-countries-modal').addEventListener('click', () => {
+    manageCountriesModal.classList.add('hidden');
+});
+
+document.getElementById('show-add-country-btn').addEventListener('click', () => {
+    document.getElementById('add-country-section').classList.remove('hidden');
+});
+
+document.getElementById('hide-add-country-btn').addEventListener('click', () => {
+    document.getElementById('add-country-section').classList.add('hidden');
+    clearCountryForm();
+});
+
+function renderCountriesList() {
+    const listEl = document.getElementById('manage-countries-list');
+    listEl.innerHTML = '';
+    
+    countriesData.forEach(country => {
+        const item = document.createElement('div');
+        item.className = 'manage-act-item';
+        const isStatic = staticData.countries.some(sc => sc.name === country.name);
+        
+        item.innerHTML = `
+            <div>
+                <strong>${country.name}</strong>
+                <small>${country.center.join(', ')} (Zoom: ${country.zoom})</small>
+            </div>
+            <div style="display:flex; gap:8px;">
+                <button class="toggle-btn-small" onclick="editCountryInModal('${country.name}')">Edit</button>
+                ${!isStatic ? `<button class="toggle-btn-small danger-small" onclick="deleteCountry('${country.name}')">Remove</button>` : ''}
+            </div>
+        `;
+        listEl.appendChild(item);
+    });
+}
+
+window.editCountryInModal = function(name) {
+    const country = countriesData.find(c => c.name === name);
+    if (!country) return;
+    
+    document.getElementById('country-edit-id').value = country.name;
+    document.getElementById('country-name-input').value = country.name;
+    document.getElementById('country-coords-input').value = country.center.join(', ');
+    document.getElementById('country-zoom-input').value = country.zoom || 7;
+    document.getElementById('add-country-section').classList.remove('hidden');
+};
+
+document.getElementById('clear-country-form-btn').addEventListener('click', () => {
+    clearCountryForm();
+});
+
+function clearCountryForm() {
+    document.getElementById('country-edit-id').value = '';
+    document.getElementById('country-name-input').value = '';
+    document.getElementById('country-coords-input').value = '';
+    document.getElementById('country-zoom-input').value = 7;
+}
+
+document.getElementById('save-country-btn').addEventListener('click', () => {
+    const name = document.getElementById('country-name-input').value.trim();
+    const coordsStr = document.getElementById('country-coords-input').value.trim();
+    const zoom = parseInt(document.getElementById('country-zoom-input').value) || 7;
+    const editId = document.getElementById('country-edit-id').value;
+
+    if (!name || !coordsStr) return alert('Name and coordinates are required.');
+    
+    const parts = coordsStr.split(',');
+    const lat = parseFloat(parts[0]);
+    const lng = parseFloat(parts[1]);
+    if (isNaN(lat) || isNaN(lng)) return alert('Invalid coordinates format. Use: lat, lng');
+
+    const countryObj = { name, center: [lat, lng], zoom };
+
+    if (editId) {
+        // Edit
+        const idx = countriesData.findIndex(c => c.name === editId);
+        if (idx !== -1) {
+            countriesData[idx] = countryObj;
+            if (editId !== name) {
+                communitiesData.forEach(comm => {
+                    if (comm.country === editId) comm.country = name;
+                });
+                const savedComms = JSON.parse(localStorage.getItem('added_communities_v2') || '[]');
+                savedComms.forEach(c => { if (c.country === editId) c.country = name; });
+                localStorage.setItem('added_communities_v2', JSON.stringify(savedComms));
+            }
+        }
+    } else {
+        // Add
+        if (countriesData.find(c => c.name === name)) return alert('Country already exists.');
+        countriesData.push(countryObj);
+    }
+
+    saveCountriesToStorage();
+    populateCountrySelect();
+    renderCountriesList();
+    renderCountryMarkers();
+    clearCountryForm();
+    document.getElementById('add-country-section').classList.add('hidden');
+    alert(editId ? 'Country updated!' : 'Country added!');
+});
+
+window.deleteCountry = function(name) {
+    if (!confirm(`Are you sure you want to remove ${name}?`)) return;
+    const used = communitiesData.some(c => c.country === name);
+    if (used) return alert(`Cannot delete ${name} because it is assigned to communities.`);
+    countriesData = countriesData.filter(c => c.name !== name);
+    saveCountriesToStorage();
+    populateCountrySelect();
+    renderCountriesList();
+    renderCountryMarkers();
 };
 // ===== KRO DASHBOARD & CHARTS =====
 const dashboardModal = document.getElementById('admin-dashboard-modal');
@@ -1720,24 +2395,24 @@ function updateDashboard() {
     document.getElementById('dash-stat-t1').innerText = avgT1;
 
     // Aggregate Community Demographics
-    const aggDemo = { population: 0, men: 0, women: 0, children: 0, elderly: 0 };
+    const aggDemo = { population: 0, male: 0, female: 0, children: 0, elderly: 0 };
     filteredComms.forEach(c => {
         if (c.demographics) {
             aggDemo.population += (c.demographics.population || 0);
-            aggDemo.men += (c.demographics.men || 0);
-            aggDemo.women += (c.demographics.women || 0);
+            aggDemo.male += (c.demographics.male || 0);
+            aggDemo.female += (c.demographics.female || 0);
             aggDemo.children += (c.demographics.children || 0);
             aggDemo.elderly += (c.demographics.elderly || 0);
         }
     });
     document.getElementById('dash-agg-population').innerText = aggDemo.population.toLocaleString();
-    document.getElementById('dash-agg-men').innerText = aggDemo.men.toLocaleString();
-    document.getElementById('dash-agg-women').innerText = aggDemo.women.toLocaleString();
+    document.getElementById('dash-agg-male').innerText = aggDemo.male.toLocaleString();
+    document.getElementById('dash-agg-female').innerText = aggDemo.female.toLocaleString();
     document.getElementById('dash-agg-children').innerText = aggDemo.children.toLocaleString();
     document.getElementById('dash-agg-elderly').innerText = aggDemo.elderly.toLocaleString();
 
     // Beneficiary Aggregation (only from activities matching filters)
-    const totals = { men: 0, women: 0, oldParticipantMen: 0, oldParticipantWomen: 0, newParticipantMen: 0, newParticipantWomen: 0 };
+    const totals = { men: 0, women: 0, oldMen: 0, oldWomen: 0, newMen: 0, newWomen: 0 };
     activitiesData.forEach(act => {
         // Filter by year/quarter if specified
         if (year !== 'All' && year !== '' && act.year !== year) return;
@@ -1761,13 +2436,16 @@ function renderCharts(totals) {
     if (reachChart) reachChart.destroy();
     if (pieChart) pieChart.destroy();
 
+    const labels = ['Men', 'Women', 'Old Men', 'Old Women', 'New Men', 'New Women'];
+    const dataVals = [totals.men, totals.women, totals.oldMen, totals.oldWomen, totals.newMen, totals.newWomen];
+
     reachChart = new Chart(ctxBar, {
         type: 'bar',
         data: {
-            labels: ['Men', 'Women', 'Men (Old Participant)', 'Women (Old Participant)', 'Men (New Participant)', 'Women (New Participant)'],
+            labels: labels,
             datasets: [{
                 label: 'Total Reach',
-                data: [totals.men, totals.women, totals.oldParticipantMen, totals.oldParticipantWomen, totals.newParticipantMen, totals.newParticipantWomen],
+                data: dataVals,
                 backgroundColor: ['#3b82f6', '#ec4899', '#6366f1', '#f43f5e', '#10b981', '#f59e0b']
             }]
         },
@@ -1779,10 +2457,376 @@ function renderCharts(totals) {
         data: {
             labels: ['Men', 'Women'],
             datasets: [{
-                data: [totals.men + totals.oldParticipantMen + totals.newParticipantMen, totals.women + totals.oldParticipantWomen + totals.newParticipantWomen],
+                data: [totals.men + totals.oldMen + totals.newMen, totals.women + totals.oldWomen + totals.newWomen],
                 backgroundColor: ['#3b82f6', '#ec4899']
             }]
         },
         options: { responsive: true, maintainAspectRatio: false }
     });
+
+    // Populate the table
+    const tableBody = document.getElementById('reach-table-body');
+    if (tableBody) {
+        tableBody.innerHTML = '';
+        labels.forEach((lbl, i) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td style="padding: 8px; border-bottom: 1px solid #eee;">${lbl}</td>
+                <td style="padding: 8px; border-bottom: 1px solid #eee; font-weight: bold;">${dataVals[i].toLocaleString()}</td>
+            `;
+            tableBody.appendChild(tr);
+        });
+        const totalAll = dataVals.reduce((a, b) => a + b, 0);
+        const trTotal = document.createElement('tr');
+        trTotal.innerHTML = `
+            <td style="padding: 8px; font-weight: bold; color: var(--primary);">Total Beneficiaries</td>
+            <td style="padding: 8px; font-weight: bold; color: var(--primary);">${totalAll.toLocaleString()}</td>
+        `;
+        tableBody.appendChild(trTotal);
+    }
 }
+
+// Reach Toggle Button
+const toggleReachBtn = document.getElementById('toggle-reach-view-btn');
+if (toggleReachBtn) {
+    toggleReachBtn.addEventListener('click', (e) => {
+        const chartContainer = document.getElementById('reach-chart-container');
+        const tableContainer = document.getElementById('reach-table-container');
+        if (chartContainer.classList.contains('hidden')) {
+            chartContainer.classList.remove('hidden');
+            tableContainer.classList.add('hidden');
+            e.target.innerText = 'Show Table';
+        } else {
+            chartContainer.classList.add('hidden');
+            tableContainer.classList.remove('hidden');
+            e.target.innerText = 'Show Chart';
+        }
+    });
+}
+
+// ===== DATA EXPORT & IMPORT =====
+function objectToCSV(data) {
+    if (!data || !data.length) return "";
+    const headers = Object.keys(data[0]);
+    const csvRows = [headers.join(',')];
+    
+    for (const row of data) {
+        const values = headers.map(header => {
+            const val = row[header];
+            const strVal = (val === null || val === undefined) ? "" : String(val);
+            if (strVal.includes(',') || strVal.includes('"') || strVal.includes('\n')) {
+                return `"${strVal.replace(/"/g, '""')}"`;
+            }
+            return strVal;
+        });
+        csvRows.push(values.join(','));
+    }
+    return csvRows.join('\n');
+}
+
+function exportToCSV(filename, csvData) {
+    const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+// ===== EXPORT MODAL SETUP =====
+(function setupExportModal() {
+    const exportBtn     = document.getElementById('export-data-btn');
+    const modal         = document.getElementById('export-modal');
+    const cancelBtn     = document.getElementById('export-modal-cancel');
+    const confirmBtn    = document.getElementById('export-modal-confirm');
+    const chkActs       = document.getElementById('export-chk-activities');
+    const chkComms      = document.getElementById('export-chk-communities');
+    const commSubopts   = document.getElementById('export-comm-suboptions');
+    const radioAll      = document.getElementById('export-comm-all');
+    const radioSpecific = document.getElementById('export-comm-specific');
+    const picker        = document.getElementById('export-comm-picker');
+    const searchInput   = document.getElementById('export-comm-search');
+    const checklistEl   = document.getElementById('export-comm-checklist');
+    const selectAllBtn  = document.getElementById('export-comm-check-all');
+    const deselectAllBtn= document.getElementById('export-comm-uncheck-all');
+
+    // Open modal and populate community list
+    exportBtn.addEventListener('click', () => {
+        // Reset state
+        chkActs.checked    = true;
+        chkComms.checked   = true;
+        radioAll.checked   = true;
+        picker.classList.add('hidden');
+        picker.style.display = 'none';
+        commSubopts.style.display = 'block';
+        searchInput.value  = '';
+
+        // Populate community checklist
+        checklistEl.innerHTML = '';
+        const sorted = [...communitiesData].sort((a, b) => a.name.localeCompare(b.name));
+        sorted.forEach(c => {
+            const label = document.createElement('label');
+            label.className = 'check-label';
+            label.innerHTML = `<input type="checkbox" class="export-comm-cb" value="${c.id}" checked>
+                               <span title="${c.country}">${c.name}</span>`;
+            checklistEl.appendChild(label);
+        });
+
+        modal.classList.remove('hidden');
+    });
+
+    // Toggle sub-options visibility when communities checkbox changes
+    chkComms.addEventListener('change', () => {
+        commSubopts.style.display = chkComms.checked ? 'block' : 'none';
+    });
+
+    // Show/hide community picker based on radio
+    document.querySelectorAll('input[name="export-comm-scope"]').forEach(radio => {
+        radio.addEventListener('change', () => {
+            const isSpecific = radioSpecific.checked;
+            picker.classList.toggle('hidden', !isSpecific);
+            picker.style.display = isSpecific ? 'block' : 'none';
+        });
+    });
+
+    // Search filter
+    searchInput.addEventListener('input', () => {
+        const q = searchInput.value.toLowerCase();
+        checklistEl.querySelectorAll('label.check-label').forEach(lbl => {
+            const name = lbl.querySelector('span').textContent.toLowerCase();
+            lbl.style.display = name.includes(q) ? '' : 'none';
+        });
+    });
+
+    // Select / Deselect all (only visible items)
+    selectAllBtn.addEventListener('click', () => {
+        checklistEl.querySelectorAll('.export-comm-cb').forEach(cb => {
+            if (cb.closest('label').style.display !== 'none') cb.checked = true;
+        });
+    });
+    deselectAllBtn.addEventListener('click', () => {
+        checklistEl.querySelectorAll('.export-comm-cb').forEach(cb => {
+            if (cb.closest('label').style.display !== 'none') cb.checked = false;
+        });
+    });
+
+    // Cancel
+    cancelBtn.addEventListener('click', () => modal.classList.add('hidden'));
+
+    // Confirm — run export based on selections
+    confirmBtn.addEventListener('click', () => {
+        const exportActs  = chkActs.checked;
+        const exportComms = chkComms.checked;
+        const scope       = radioSpecific.checked ? 'specific' : 'all';
+
+        if (!exportActs && !exportComms) {
+            alert('Please select at least one item to export.');
+            return;
+        }
+
+        // Determine which communities to export
+        let commsToExport = communitiesData;
+        if (exportComms && scope === 'specific') {
+            const selectedIds = new Set(
+                [...checklistEl.querySelectorAll('.export-comm-cb:checked')].map(cb => cb.value)
+            );
+            commsToExport = communitiesData.filter(c => selectedIds.has(c.id));
+            if (commsToExport.length === 0) {
+                alert('Please select at least one community to export.');
+                return;
+            }
+        }
+
+        // --------------- Export Activities ---------------
+        if (exportActs) {
+            let actsToExport = activitiesData;
+
+            // If specific communities are selected, filter activities to those communities
+            if (scope === 'specific' && exportComms) {
+                const selectedIds = new Set(commsToExport.map(c => c.id));
+                actsToExport = activitiesData.filter(a =>
+                    a.communityIds.some(id => selectedIds.has(id))
+                );
+            }
+
+            const actCSV = objectToCSV(actsToExport.map(a => ({
+                Id: a.id,
+                Name: a.name,
+                Year: a.year || '',
+                Quarter: a.quarter || '',
+                IndicatorIds: a.indicatorIds.join(';'),
+                CommunityIds: a.communityIds.join(';'),
+                KnowledgeGenerated: a.knowledgeGenerated,
+                Men:      a.beneficiaries.men,
+                Women:    a.beneficiaries.women,
+                OldMen:   a.beneficiaries.oldMen,
+                OldWomen: a.beneficiaries.oldWomen,
+                NewMen:   a.beneficiaries.newMen,
+                NewWomen: a.beneficiaries.newWomen
+            })));
+            exportToCSV(`activities_${Date.now()}.csv`, actCSV);
+        }
+
+        // --------------- Export Communities ---------------
+        if (exportComms && commsToExport.length > 0) {
+            const commHeaders = ['Id', 'Name', 'Country', 'Province', 'District', 'Lat', 'Lng',
+                                 'T0_Score', 'T1_Score', 'TotalPop', 'Male', 'Female', 'Children',
+                                 'Elderly', 'Disabilities', 'HHs', 'Description'];
+
+            // Collect all unique indicator IDs for consistent columns
+            const allIndIds = new Set();
+            commsToExport.forEach(c => {
+                if (c.gradings) Object.keys(c.gradings).forEach(id => allIndIds.add(id));
+            });
+            const sortedIndIds = Array.from(allIndIds).sort();
+            sortedIndIds.forEach(id => commHeaders.push(`${id}_t0`, `${id}_t1`));
+
+            const commRows = [commHeaders.join(',')];
+            commsToExport.forEach(c => {
+                const row = [
+                    c.id, c.name, c.country, c.province || '', c.district || '',
+                    c.coords[0], c.coords[1], c.t0_score, c.t1_score || '',
+                    c.demographics.total, c.demographics.male, c.demographics.female,
+                    c.demographics.children, c.demographics.elderly, c.demographics.disabilities,
+                    c.demographics.hhs || 0, c.demographics.description || ''
+                ];
+                sortedIndIds.forEach(id => {
+                    const g = (c.gradings && c.gradings[id]) ? c.gradings[id] : { t0: '', t1: '' };
+                    row.push(g.t0 || '', g.t1 || '');
+                });
+                commRows.push(row.map(val => {
+                    const strVal = (val === null || val === undefined) ? '' : String(val);
+                    if (strVal.includes(',') || strVal.includes('"') || strVal.includes('\n')) {
+                        return `"${strVal.replace(/"/g, '""')}"`;
+                    }
+                    return strVal;
+                }).join(','));
+            });
+
+            const filename = scope === 'specific'
+                ? `communities_selected_${Date.now()}.csv`
+                : `communities_all_${Date.now()}.csv`;
+            exportToCSV(filename, commRows.join('\n'));
+        }
+
+        modal.classList.add('hidden');
+        alert(`Export complete!${exportActs ? ' Activities included.' : ''}${exportComms ? ` ${commsToExport.length} community/communities included.` : ''}`);
+    });
+})();
+
+document.getElementById('import-data-btn').addEventListener('click', () => {
+    document.getElementById('import-data-file').click();
+});
+
+document.getElementById('import-data-file').addEventListener('change', (e) => {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+
+    if (!confirm('This will update your data with the selected CSV files. Are you sure?')) {
+        e.target.value = '';
+        return;
+    }
+
+    let loadedCount = 0;
+    files.forEach(file => {
+        Papa.parse(file, {
+            header: true,
+            skipEmptyLines: true,
+            complete: function(results) {
+                const data = results.data;
+                if (!data || !data.length) return;
+
+                // Determine if it's an activities file or communities file
+                if (file.name.toLowerCase().includes('activities')) {
+                    // Import Activities
+                    const importedActs = data.map(row => mapCSVToActivity(row));
+                    
+                    // Merge with existing activities (update existing by Id, add new)
+                    const savedActs = JSON.parse(localStorage.getItem('added_activities_v2') || '[]');
+                    const actMap = new Map(savedActs.map(a => [a.id, a]));
+                    importedActs.forEach(a => actMap.set(a.id, a));
+                    localStorage.setItem('added_activities_v2', JSON.stringify(Array.from(actMap.values())));
+                } else {
+                    // Import Communities
+                    const importedComms = data.map(row => mapCSVToCommunity(row));
+
+                    // Merge with existing communities
+                    // Strategy: Match by Id OR Name
+                    const savedComms = JSON.parse(localStorage.getItem('added_communities_v2') || '[]');
+                    
+                    importedComms.forEach(imported => {
+                        let existingIndex = savedComms.findIndex(c => c.id === imported.id || c.name.toLowerCase() === imported.name.toLowerCase());
+                        if (existingIndex !== -1) {
+                            // Update existing (merge gradings if needed, or just overwrite with the newer CSV data)
+                            savedComms[existingIndex] = imported;
+                        } else {
+                            // Add as new
+                            savedComms.push(imported);
+                        }
+                    });
+                    
+                    localStorage.setItem('added_communities_v2', JSON.stringify(savedComms));
+                }
+
+                loadedCount++;
+                if (loadedCount === files.length) {
+                    alert('All data imported successfully! The page will now reload.');
+                    window.location.reload();
+                }
+            },
+            error: function(err) {
+                alert('Error parsing CSV: ' + err.message);
+            }
+        });
+    });
+});
+
+// ===== UI TOGGLES FOR ADD FORMS =====
+
+const setupFormToggle = (showBtnId, hideBtnId, sectionId) => {
+    const showBtn = document.getElementById(showBtnId);
+    const hideBtn = document.getElementById(hideBtnId);
+    const section = document.getElementById(sectionId);
+    
+    if (showBtn && hideBtn && section) {
+        showBtn.addEventListener('click', () => section.classList.remove('hidden'));
+        hideBtn.addEventListener('click', () => section.classList.add('hidden'));
+    }
+};
+
+setupFormToggle('show-add-activity-btn', 'hide-add-activity-btn', 'add-activity-section');
+setupFormToggle('show-add-user-btn', 'hide-add-user-btn', 'add-user-section');
+setupFormToggle('show-add-indicator-btn', 'hide-add-indicator-btn', 'add-indicator-section');
+
+// ===== COMMUNITY ADDITION FLOW (FROM MODAL) =====
+let isAddingCommunityMode = false;
+
+// map logic moved to setupMapListeners
+
+// Manage Communities "Add New" Button
+document.getElementById('trigger-map-add-btn')?.addEventListener('click', () => {
+    manageCommModal.classList.add('hidden');
+    isAddingCommunityMode = true;
+    const prompt = document.getElementById('map-click-prompt');
+    if (prompt) {
+        prompt.classList.remove('hidden');
+        prompt.style.display = 'flex';
+    }
+});
+
+// Cancel Map Click Mode
+document.getElementById('cancel-map-click-btn')?.addEventListener('click', () => {
+    isAddingCommunityMode = false;
+    const prompt = document.getElementById('map-click-prompt');
+    if (prompt) {
+        prompt.classList.add('hidden');
+        prompt.style.display = 'none';
+    }
+    openManageCommunitiesModal();
+});
+
+// Start initialization
+initData();

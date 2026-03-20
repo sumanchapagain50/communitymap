@@ -1,0 +1,77 @@
+Id,CapitalId,Name
+F01,financial,Household access to discretionary funds
+F02,financial,Community financial health
+F03,financial,Local government financial capacity
+F04,financial,Public infrastructure maintenance budget
+F05,financial,Climate change adaptation planning and investment
+F06,financial,Business continuity during floods
+F07,financial,Business continuity during heatwave
+F08,financial,Household income continuity during flood
+F09,financial,Household income continuity during heatwave
+F10,financial,Flood risk reduction investment
+F11,financial,Heatwave risk reduction investment
+F12,financial,Disaster insurance
+F13,financial,Disaster recovery budget
+F14,financial,Energy affordibility
+F15,financial,Heatwave action-plan budget
+H01,human,Secondary school attendance
+H02,human,Food availability
+H03,human,First aid knowledge
+H04,human,Awareness of the need for climate change action
+H05,human,Awarenss of climate change risk on floods
+H06,human,Awarenss of climate change risk on heatwaves
+H07,human,Awareness of how nature mitigates risk during floods
+H08,human,Awareness of how nature mitigates risk during heatwaves
+H09,human,Hazard exposure awareness
+H10,human,Hazard vulnerability awareness
+H11,human,Evacuation and safety knowledge
+H12,human,Unsafe water awareness
+H13,human,Heatwave protection knowledge
+H14,human,Worker protection for heatwaves
+N01,natural,Tree cover
+N02,natural,Permeable surfaces
+N03,natural,Land use planning
+N04,natural,Resource management
+N05,natural,Land/water interface health
+N06,natural,Ecological management for flood disaster risk reduction
+N07,natural,Ecological management for heatwave disaster risk reduction
+P01,physical,Energy supply continuity
+P02,physical,Transportation system continuity
+P03,physical,Communication systems continuity
+P04,physical,Flood early warning
+P05,physical,Heatwave early warning
+P06,physical,Continuity of education during floods
+P07,physical,Continuity of education during heatwaves
+P08,physical,Emergency infrastructure and supplies during floods
+P09,physical,Emergency infrastructure and supplies during heatwaves
+P10,physical,Continuity of healthcare during disaster during floods
+P11,physical,Continuity of healthcare during disaster during heatwaves
+P12,physical,Forecasting for floods
+P13,physical,Forecasting for heatwaves
+P14,physical,Household protection and adaptation on floods
+P15,physical,Household protection and adaptation on heatwaves
+P16,physical,Availability of clean, safe water during floods
+P17,physical,Availability of clean, safe water during heatwaves
+P18,physical,Waste management and risk
+P19,physical,Large scale flood protection
+S01,social,Mutual support
+S02,social,Social inclusiveness of disaster risk management
+S03,social,Community safety
+S04,social,Local leadership
+S05,social,Disaster response personnel
+S06,social,Healthcare accessibility
+S07,social,Trust in local authorities
+S08,social,Intra-community equity
+S09,social,Inter-community equity
+S10,social,Risk reduction planning for floods
+S11,social,Risk reduction planning for heatwaves
+S12,social,Response planning for floods
+S13,social,Response planning for heatwaves
+S14,social,Family violence and response planning during floods
+S15,social,Family violence and response planning during heatwaves
+S16,social,Stakeholder engagement in risk management for floods
+S17,social,Stakeholder engagement in risk management for heatwaves
+S18,social,Flood risk mapping
+S19,social,Heatwave risk mapping
+S20,social,Flood disaster impact data collection and use
+S21,social,Heatwave disaster impact data collection and use
