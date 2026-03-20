@@ -34,6 +34,7 @@
                 <button id="manage-indicators-btn" class="toggle-btn hidden">Manage Indicators</button>
                 <button id="manage-knowledge-btn" class="toggle-btn hidden">Manage Knowledge</button>
                 <button id="manage-countries-btn" class="toggle-btn hidden">Manage Countries</button>
+                <button id="manage-interventions-btn" class="toggle-btn hidden" style="background: linear-gradient(135deg, #f59e0b, #d97706); color: white; border-color: #d97706;">📍 Interventions</button>
                 <button id="archived-communities-btn" class="toggle-btn hidden">Archive</button>
                 <button id="kro-dashboard-btn" class="toggle-btn hidden">Reach Dashboard</button>
                 <button id="export-data-btn" class="toggle-btn hidden">Export Data</button>
@@ -703,8 +704,74 @@
 
     <!-- Map Click Prompt Overlay -->
     <div id="map-click-prompt" class="hidden" style="position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 9999; background: var(--primary); color: white; padding: 10px 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: none; align-items: center; gap: 15px;">
-        <span>Please click on the map to set the location for the new community.</span>
+        <span id="map-click-prompt-text">Please click on the map to set the location.</span>
         <button id="cancel-map-click-btn" class="toggle-btn-small danger-small">Cancel</button>
+    </div>
+
+    <!-- Manage Interventions Modal -->
+    <div id="manage-interventions-modal" class="modal hidden">
+        <div class="modal-content large" style="max-height: 90vh;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h3 style="color: #d97706; margin: 0;">📍 Manage Interventions</h3>
+                <button id="show-add-intervention-btn" class="toggle-btn-small primary">+ Add New Intervention</button>
+            </div>
+            <p class="form-hint" style="margin-top: -10px;">Manually place intervention markers on the map with a name, coordinates, and description.</p>
+
+            <!-- Add / Edit Intervention Section -->
+            <div id="add-intervention-section" class="manage-act-add hidden">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <h4 style="color: #d97706;">Add / Edit Intervention</h4>
+                    <button id="hide-add-intervention-btn" class="toggle-btn-small" style="background: none; border: none; font-size: 1.2rem; padding: 0;">&times;</button>
+                </div>
+                <input type="hidden" id="intervention-edit-id" value="">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Intervention Name <span style="color:#ef4444;">*</span></label>
+                        <input type="text" id="intervention-name-input" placeholder="e.g., Flood Barrier Construction">
+                    </div>
+                    <div class="form-group">
+                        <label>Coordinates (Lat, Lng) <span style="color:#ef4444;">*</span></label>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <input type="text" id="intervention-coords-input" placeholder="e.g., 27.7172, 85.3240" style="flex: 1;">
+                            <button type="button" id="intervention-pick-map-btn" class="toggle-btn-small" style="background:#f59e0b; color:white; border-color:#d97706; white-space:nowrap;">📍 Pick on Map</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-top: 10px;">
+                    <label>Description</label>
+                    <textarea id="intervention-desc-input" placeholder="Brief description of the intervention, its purpose, status, etc." rows="3" style="width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; font-family: inherit; resize: vertical;"></textarea>
+                </div>
+                <div class="form-group" style="margin-top: 10px;">
+                    <label>Category (Optional)</label>
+                    <select id="intervention-category-input" style="width: 100%; padding: 9px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem;">
+                        <option value="">-- Select Category --</option>
+                        <option value="Flood Management">Flood Management</option>
+                        <option value="Heatwave Response">Heatwave Response</option>
+                        <option value="Community Training">Community Training</option>
+                        <option value="Infrastructure">Infrastructure</option>
+                        <option value="Early Warning">Early Warning</option>
+                        <option value="Livelihood Support">Livelihood Support</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 14px;">
+                    <button type="button" id="save-intervention-btn" class="toggle-btn primary">Save Intervention</button>
+                    <button type="button" id="clear-intervention-form-btn" class="toggle-btn">Clear</button>
+                </div>
+            </div>
+
+            <hr style="margin: 20px 0; border-color: #e2e8f0;">
+
+            <!-- Existing Interventions List -->
+            <h4 style="margin-bottom: 12px; color: var(--text-main);">Existing Interventions</h4>
+            <div id="manage-interventions-list" style="max-height: 350px; overflow-y: auto;">
+                <!-- Populated by JS -->
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" id="close-interventions-modal" class="toggle-btn">Close</button>
+            </div>
+        </div>
     </div>
 
     <!-- Conflict Resolution Modal (shown on load when CSV duplicates local data) -->
