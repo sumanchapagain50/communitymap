@@ -490,9 +490,11 @@ function setupIndicatorFilterListeners() {
         const el = document.getElementById(`filter-${type}-${side}`);
         if (el) {
             el.addEventListener('change', () => {
-                // Re-render current column
-                const name = document.getElementById('community-name').innerText;
-                const activeComm = communitiesData.find(c => c.name === name) || null;
+                // Re-render current column depending on active dropdown
+                const commSelect = document.getElementById('community-select');
+                const activeComm = (commSelect && commSelect.value !== 'All') 
+                    ? communitiesData.find(c => c.id === commSelect.value) || null 
+                    : null;
                 renderColumn(activeComm, side);
             });
         }
@@ -1015,6 +1017,12 @@ function renderCountryMarkers() {
 
         const marker = L.marker(country.center, { icon: countryIcon });
         marker.on('click', () => {
+            if (typeof isInterMapMode !== 'undefined' && isInterMapMode) closeInterventionMapView();
+            const colAct = document.getElementById('col-activities');
+            if (colAct && !colAct.classList.contains('hidden')) closeActivitiesSidebarView();
+            const colKnow = document.getElementById('col-knowledge');
+            if (colKnow && !colKnow.classList.contains('hidden')) closeKnowledgeSidebarView();
+
             onCountrySelection(country.name);
         });
         markersGroup.addLayer(marker);
@@ -1046,6 +1054,7 @@ function onCountrySelection(countryName, repopulateCommunities = true) {
     } else {
         renderMarkers(countryName);
         resetHighlights();
+        renderColumn(null, 'main'); // IMPORTANT: Ensure the sidebar layout reflects the country shift instantly
         const country = countriesData.find(c => c.name === countryName);
         if (country && repopulateCommunities) {
             map.flyTo(country.center, country.zoom || 8, { animate: true, duration: 1.5 });
@@ -1066,8 +1075,16 @@ function renderMarkers(countryFilter = "All") {
 
     filteredComms.forEach(community => {
         const marker = L.marker(community.coords);
+        marker.bindTooltip(community.name); // Standard hover
         marker.on('click', () => {
             resetHighlights();
+            
+            if (typeof isInterMapMode !== 'undefined' && isInterMapMode) closeInterventionMapView();
+            const colAct = document.getElementById('col-activities');
+            if (colAct && !colAct.classList.contains('hidden')) closeActivitiesSidebarView();
+            const colKnow = document.getElementById('col-knowledge');
+            if (colKnow && !colKnow.classList.contains('hidden')) closeKnowledgeSidebarView();
+
             renderColumn(community, 'main');
             sidebar.classList.remove('hidden');
             showBtn.classList.add('hidden');
@@ -1085,24 +1102,52 @@ function renderMarkers(countryFilter = "All") {
 // Initial Map Load (handled in finishInit)
 
 function resetHighlights() {
-    Object.values(communityMarkers).forEach(m => {
+    Object.keys(communityMarkers).forEach(id => {
+        const m = communityMarkers[id];
         const icon = m.getElement();
-        if (icon) icon.classList.remove('leaflet-marker-highlighted');
+        if (icon) {
+            icon.classList.remove('leaflet-marker-highlighted');
+            icon.style.display = '';
+        }
+        m.unbindTooltip(); // Clears any permanent label
+        
+        // Re-bind standard hover tooltip
+        const comm = communitiesData.find(c => c.id === id);
+        if (comm) {
+            m.bindTooltip(comm.name);
+        }
     });
 }
 
-function highlightCommunities(communityIds) {
+function highlightCommunities(communityIds, fitBounds = true, hideOthers = true) {
     resetHighlights();
     const markersToFit = [];
-    communityIds.forEach(id => {
+    Object.keys(communityMarkers).forEach(id => {
         const m = communityMarkers[id];
-        if (m) {
-            const icon = m.getElement();
-            if (icon) icon.classList.add('leaflet-marker-highlighted');
-            markersToFit.push(m.getLatLng());
+        const icon = m.getElement();
+        if (icon) {
+            if (communityIds.includes(id)) {
+                icon.style.display = '';
+                icon.classList.add('leaflet-marker-highlighted');
+                markersToFit.push(m.getLatLng());
+                
+                const comm = communitiesData.find(c => c.id === id);
+                if (comm) {
+                    m.unbindTooltip();
+                    m.bindTooltip(comm.name, {
+                        permanent: true, 
+                        direction: 'right', 
+                        className: 'comm-label-tooltip',
+                        offset: [15, -20]
+                    }).openTooltip();
+                }
+            } else if (hideOthers) {
+                icon.style.display = 'none';
+            }
         }
     });
-    if (markersToFit.length > 0) {
+
+    if (fitBounds && markersToFit.length > 0) {
         const bounds = L.latLngBounds(markersToFit);
         map.fitBounds(bounds, { padding: [50, 50], maxZoom: 8 });
     }
@@ -1153,8 +1198,8 @@ function populateCommunitySelect(countryFilter = "All") {
 function initTabs() {
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            const col = btn.dataset.col; // 'main' or 'compare'
-            const tab = btn.dataset.tab; // 'score', 'demographics', etc.
+            const col = btn.dataset.col; 
+            const tab = btn.dataset.tab; 
 
             // Update buttons in this column
             document.querySelectorAll(`.tab-btn[data-col="${col}"]`).forEach(b => b.classList.remove('active'));
@@ -1163,8 +1208,39 @@ function initTabs() {
             // Update contents in this column
             document.querySelectorAll(`.tab-content[id*="-${col}"]`).forEach(c => c.classList.add('hidden'));
             document.getElementById(`tab-${tab}-${col}`).classList.remove('hidden');
+            
+            // Manage headers for Activities tab
+            if (col === 'main') {
+                const filtersDiv = document.querySelector('#col-main .filters');
+                const titleHeading = document.getElementById('community-name');
+                const globalCommSelect = document.getElementById('community-select');
+                
+                if (tab === 'activities') {
+                    if (filtersDiv) filtersDiv.classList.add('hidden');
+                    if (titleHeading) titleHeading.innerText = 'Activities';
+                    
+                    // Render activities list for the globally selected community
+                    const comm = (globalCommSelect && globalCommSelect.value !== 'All') 
+                        ? communitiesData.find(c => c.id === globalCommSelect.value) 
+                        : null;
+                    const cFilter = document.getElementById('country-select') ? document.getElementById('country-select').value : 'All';
+                    renderActivities(comm, 'activities-list-main', cFilter);
+                } else {
+                    if (filtersDiv) filtersDiv.classList.remove('hidden');
+                    // Restore title
+                    const activeComm = communitiesData.find(c => c.id === (globalCommSelect ? globalCommSelect.value : 'All'));
+                    if (titleHeading) {
+                        if (activeComm) titleHeading.innerText = 'Community Overview';
+                        else {
+                            const cFilter = document.getElementById('country-select') ? document.getElementById('country-select').value : 'All';
+                            titleHeading.innerText = cFilter !== "All" ? 'Country Overview' : 'Global Overview';
+                        }
+                    }
+                }
+            }
         });
     });
+    
 }
 
 // State
@@ -1194,16 +1270,47 @@ const side = 'main';
     if (el) {
         el.addEventListener('change', () => {
             // Determine which community is currently active
-            const name = document.getElementById('community-name').innerText;
-            const activeComm = communitiesData.find(c => c.name === name) || null;
+            const commSelect = document.getElementById('community-select');
+            const activeComm = (commSelect && commSelect.value !== 'All') 
+                ? communitiesData.find(c => c.id === commSelect.value) || null 
+                : null;
             renderColumn(activeComm, side);
         });
     }
 });
 
 function renderColumn(community, colType) {
-    const title = community ? community.name : "Global Overview";
+    const countryFilter = document.getElementById('country-select') ? document.getElementById('country-select').value : 'All';
+    let title = "Global Overview";
+    if (community) {
+        title = `Community Overview`;
+    } else if (countryFilter !== "All") {
+        title = `Country Overview`;
+    }
     document.getElementById('community-name').innerText = title;
+
+    // Toggle Landing Page UI
+    const colMain = document.getElementById('col-main');
+    const tabsContainer = colMain.querySelector('.tabs');
+    
+    if (!community) {
+        // Hide tabs menu completely
+        if (tabsContainer) tabsContainer.classList.add('hidden');
+        
+        // Force Overview (Demographics) tab to be the only visible content
+        colMain.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+        document.getElementById('tab-demographics-main').classList.remove('hidden');
+    } else {
+        // Show tabs menu
+        if (tabsContainer) tabsContainer.classList.remove('hidden');
+        
+        // Restore active tab display based on buttons
+        const activeBtn = colMain.querySelector('.tab-btn.active') || colMain.querySelector('.tab-btn');
+        if (activeBtn) {
+            colMain.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+            document.getElementById(`tab-${activeBtn.dataset.tab}-main`).classList.remove('hidden');
+        }
+    }
     
     // Sync community select
     if (communitySelect) {
@@ -1230,7 +1337,6 @@ function renderColumn(community, colType) {
         gaugeGroup.classList.add('hidden');
     }
 
-    const countryFilter = document.getElementById('country-select') ? document.getElementById('country-select').value : 'All';
     renderDemographics(community, 'demographics-text-main');
     renderActivities(community, 'activities-list-main', countryFilter);
     renderKnowledge(community, 'knowledge-list-main');
@@ -1359,6 +1465,68 @@ function renderDemographics(community, targetId) {
         </div>
         <div class="demo-description">${d.description}</div>
     `;
+
+    // Add Theoretical Definitions or Country Brief below aggregate demographics
+    const defContainer = document.getElementById('theoretical-definitions-main');
+    if (defContainer) {
+        defContainer.innerHTML = '';
+        if (!community) {
+            defContainer.style.display = 'block';
+            defContainer.classList.remove('hidden');
+            
+            const currentCountry = document.getElementById('country-select').value;
+            
+            if (currentCountry !== 'All') {
+                // Country Mode: Show Country Brief
+                const cData = staticData.countries.find(c => c.name === currentCountry);
+                const brief = cData && cData.brief ? cData.brief : `Brief overview for ${currentCountry} is currently unavailable. Data monitoring and resilience mapping is actively ongoing.`;
+                
+                const defHeader = document.createElement('h3');
+                defHeader.innerText = "Country Brief";
+                defHeader.style.margin = "10px 0 20px 0";
+                defHeader.style.fontSize = "0.9rem";
+                defHeader.style.color = "var(--primary)";
+                defHeader.style.textTransform = "uppercase";
+                defContainer.appendChild(defHeader);
+                
+                const briefDiv = document.createElement('div');
+                briefDiv.className = 'info-card';
+                briefDiv.style.marginBottom = '15px';
+                briefDiv.style.borderLeft = `4px solid var(--primary)`;
+                briefDiv.style.paddingLeft = '12px';
+                briefDiv.style.fontSize = '0.9rem';
+                briefDiv.style.lineHeight = '1.6';
+                briefDiv.style.color = 'var(--text-main)';
+                briefDiv.innerHTML = brief;
+                defContainer.appendChild(briefDiv);
+                
+            } else {
+                // Global Mode: Show Theoretical Definitions
+                const defHeader = document.createElement('h3');
+                defHeader.innerText = "Theoretical Definitions";
+                defHeader.style.margin = "10px 0 20px 0";
+                defHeader.style.fontSize = "0.9rem";
+                defHeader.style.color = "var(--primary)";
+                defHeader.style.textTransform = "uppercase";
+                defContainer.appendChild(defHeader);
+
+                staticData.capitals.forEach(cap => {
+                    const defDiv = document.createElement('div');
+                    defDiv.style.marginBottom = '15px';
+                    defDiv.style.borderLeft = `4px solid ${cap.color}`;
+                    defDiv.style.paddingLeft = '12px';
+                    defDiv.innerHTML = `
+                        <div style="font-weight: 700; color: ${cap.color}; margin-bottom: 5px;">${cap.name}</div>
+                        <div style="font-size: 0.85rem; line-height: 1.5; color: var(--text-muted);">${cap.description}</div>
+                    `;
+                    defContainer.appendChild(defDiv);
+                });
+            }
+        } else {
+            defContainer.style.display = 'none';
+        }
+    }
+
     lucide.createIcons();
 }
 
@@ -1368,20 +1536,81 @@ function renderActivities(community, targetId, countryFilter = "All") {
 
     if (community) {
         const related = activitiesData.filter(a => a.communityIds.includes(community.id));
-        const grouped = {};
-        related.forEach(a => {
-            const name = a.name;
-            const time = (a.year && a.quarter) ? `${a.year}-Q${a.quarter}` : 'N/A';
-            if (!grouped[name]) grouped[name] = [];
-            grouped[name].push(time);
-        });
-
-        Object.keys(grouped).forEach(name => {
+        related.forEach(act => {
+            const time = (act.year && act.quarter) ? `${act.year}-Q${act.quarter}` : 'N/A';
             const li = document.createElement('li');
-            const times = [...new Set(grouped[name])].sort().join(', ');
-            li.innerHTML = `<strong>${name}</strong><small> | ${times}</small>`;
+            li.style.cursor = 'pointer';
+            li.style.transition = 'transform 0.2s, box-shadow 0.2s';
+            li.onmouseover = () => { li.style.transform = 'translateY(-2px)'; li.style.boxShadow = '0 8px 16px rgba(0,0,0,0.06)'; };
+            li.onmouseout = () => { li.style.transform = 'translateY(0)'; li.style.boxShadow = '0 2px 4px rgba(0,0,0,0.02)'; };
+
+            const indText = act.indicatorIds && act.indicatorIds.length > 0
+                ? act.indicatorIds.map(id => {
+                    for (const cap in indicatorsData) {
+                        if (indicatorsData[cap]) {
+                            const found = indicatorsData[cap].find(i => i.id === id);
+                            if (found) return found.name;
+                        }
+                    }
+                    return id;
+                  }).join(', ')
+                : 'None';
+
+            let benText = 'None specified';
+            if (act.beneficiaries) {
+                const b = act.beneficiaries;
+                const total = (b.men||0) + (b.women||0) + (b.oldMen||0) + (b.oldWomen||0) + (b.newMen||0) + (b.newWomen||0);
+                if (total > 0) {
+                    benText = `Total: ${total} (Men: ${(b.men||0)+(b.oldMen||0)+(b.newMen||0)}, Women: ${(b.women||0)+(b.oldWomen||0)+(b.newWomen||0)})`;
+                }
+            }
+
+            const commListHtml = act.communityIds.map(cid => {
+                const comm = communitiesData.find(c => c.id === cid);
+                return comm ? `<li>${comm.name} (${time})</li>` : '';
+            }).join('');
+            
+            li.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                    <div>
+                        <strong style="color: var(--primary); display: block; margin-bottom: 4px; font-size: 0.95rem;">${act.name}</strong>
+                        <small style="color: #64748b;">
+                            <i data-lucide="calendar" style="width: 12px; height: 12px; vertical-align: middle;"></i> ${time}
+                        </small>
+                    </div>
+                    <span class="chevron" style="color: var(--text-muted); font-size: 0.8rem; margin-top: 2px;">▼</span>
+                </div>
+                <div class="activity-details-global hidden" style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e2e8f0; font-size: 0.8rem; color: var(--text-muted);">
+                    <div style="margin-bottom: 6px;"><strong style="color: var(--text-main);">Indicators:</strong> ${indText}</div>
+                    <div style="margin-bottom: 6px;"><strong style="color: var(--text-main);">Beneficiaries:</strong> ${benText}</div>
+                    <div style="margin-bottom: 6px;"><strong style="color: var(--text-main);">Knowledge Generated:</strong> ${act.knowledgeGenerated ? '<span style="color:#10b981; font-weight:600;">Yes</span>' : 'No'}</div>
+                    <div style="margin-bottom: 6px;"><strong style="color: var(--text-main);">Communities Undertaken:</strong>
+                        <ul style="margin: 4px 0 0 16px; padding: 0; list-style-type: disc;">
+                            ${commListHtml || '<li>None</li>'}
+                        </ul>
+                    </div>
+                </div>
+            `;
+            
+            li.onclick = () => {
+                const details = li.querySelector('.activity-details-global');
+                const chevron = li.querySelector('.chevron');
+                const isHidden = details.classList.contains('hidden');
+                
+                if (isHidden) {
+                    details.classList.remove('hidden');
+                    chevron.innerText = '▲';
+                    highlightCommunities(act.communityIds, false);
+                } else {
+                    details.classList.add('hidden');
+                    chevron.innerText = '▼';
+                    resetHighlights();
+                }
+            };
+            
             list.appendChild(li);
         });
+        if (window.lucide) window.lucide.createIcons();
     } else {
         const uniqueActs = [];
         activitiesData.forEach(a => {
@@ -1453,8 +1682,10 @@ function renderActivities(community, targetId, countryFilter = "All") {
                 if (isHidden) {
                     details.classList.remove('hidden');
                     li.classList.add('expanded');
-                    highlightCommunities(act.instances.map(i => i.commId));
+                    highlightCommunities(act.instances.map(i => i.commId), false);
                 } else {
+                    details.classList.add('hidden');
+                    li.classList.remove('expanded');
                     resetHighlights();
                 }
             };
@@ -1488,19 +1719,43 @@ function drawGauge(t0, t1, canvasId, side) {
     const ctx = canvas.getContext('2d');
     const cx = canvas.width / 2, cy = canvas.height - 20, r = 100;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.lineWidth = 20;
+    
+    // Draw 3 segmented intervals (0-33, 33-67, 67-100)
+    // 0 to 33 (Degraded)
     ctx.beginPath();
-    ctx.arc(cx, cy, r, Math.PI, 0);
-    ctx.lineWidth = 20; ctx.strokeStyle = '#e2e8f0'; ctx.stroke();
+    ctx.arc(cx, cy, r, Math.PI, Math.PI + (Math.PI * 0.33));
+    ctx.strokeStyle = '#fca5a5';
+    ctx.stroke();
+
+    // 33 to 67 (Moderate)
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, Math.PI + (Math.PI * 0.33), Math.PI + (Math.PI * 0.67));
+    ctx.strokeStyle = '#fde047';
+    ctx.stroke();
+
+    // 67 to 100 (Optimal)
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, Math.PI + (Math.PI * 0.67), 0);
+    ctx.strokeStyle = '#86efac';
+    ctx.stroke();
+
+    // Add visual separators for the bounds (33, 67)
+    ctx.lineWidth = 22;
+    ctx.strokeStyle = '#ffffff';
+    [0.33, 0.67].forEach(pct => {
+        ctx.beginPath();
+        const angle = Math.PI + (Math.PI * pct);
+        ctx.arc(cx, cy, r, angle - 0.015, angle + 0.015);
+        ctx.stroke();
+    });
 
     const showT0 = document.getElementById(`show-t0-${side}`).checked;
     const showT1 = document.getElementById(`show-t1-${side}`).checked;
 
     if (showT0) drawNeedle(ctx, cx, cy, r - 10, (t0 / 100) * Math.PI, '#94a3b8');
     if (showT1) drawNeedle(ctx, cx, cy, r, (t1 / 100) * Math.PI, '#2563eb');
-
-    // Update labels visibility
-    document.getElementById(`label-t0-${side}`).style.opacity = showT0 ? '1' : '0';
-    document.getElementById(`label-t1-${side}`).style.opacity = showT1 ? '1' : '0';
 }
 
 function drawNeedle(ctx, x, y, len, angle, color) {
@@ -1513,29 +1768,7 @@ function renderCapitals(community, containerId, side) {
     const container = document.getElementById(containerId);
     container.innerHTML = '';
 
-    if (!community) {
-        // Global / Home Mode: Show Theoretical Definitions
-        const defHeader = document.createElement('h3');
-        defHeader.innerText = "Theoretical Definitions";
-        defHeader.style.margin = "10px 0 20px 0";
-        defHeader.style.fontSize = "0.9rem";
-        defHeader.style.color = "var(--primary)";
-        defHeader.style.textTransform = "uppercase";
-        container.appendChild(defHeader);
-
-        staticData.capitals.forEach(cap => {
-            const defDiv = document.createElement('div');
-            defDiv.className = 'info-card';
-            defDiv.style.marginBottom = '15px';
-            defDiv.style.borderLeft = `4px solid ${cap.color}`;
-            defDiv.innerHTML = `
-                <div style="font-weight: 700; color: ${cap.color}; margin-bottom: 5px;">${cap.name}</div>
-                <div style="font-size: 0.85rem; line-height: 1.5; color: var(--text-muted);">${cap.description}</div>
-            `;
-            container.appendChild(defDiv);
-        });
-        return;
-    }
+    if (!community) return;
 
     const showT0 = document.getElementById(`show-t0-${side}`).checked;
     const showT1 = document.getElementById(`show-t1-${side}`).checked;
@@ -1779,16 +2012,71 @@ function renderManageActivitiesList() {
     const sorted = [...activitiesData].sort((a,b) => a.name.localeCompare(b.name));
     
     sorted.forEach(act => {
+        const time = (act.year && act.quarter) ? `${act.year}-Q${act.quarter}` : 'N/A';
         const item = document.createElement('div');
         item.className = 'manage-act-item';
+        item.style.cursor = 'pointer';
+        item.style.transition = 'transform 0.2s, box-shadow 0.2s';
+        item.style.display = 'block';
+        item.onmouseover = () => { item.style.transform = 'translateY(-2px)'; item.style.boxShadow = '0 8px 16px rgba(0,0,0,0.06)'; };
+        item.onmouseout = () => { item.style.transform = 'translateY(0)'; item.style.boxShadow = '0 2px 4px rgba(0,0,0,0.02)'; };
+
+        const indText = act.indicatorIds && act.indicatorIds.length > 0
+            ? act.indicatorIds.map(id => {
+                for (const cap in indicatorsData) {
+                    if (indicatorsData[cap]) {
+                        const found = indicatorsData[cap].find(i => i.id === id);
+                        if (found) return found.name;
+                    }
+                }
+                return id;
+              }).join(', ')
+            : 'None';
+
+        let benText = 'None specified';
+        if (act.beneficiaries) {
+            const b = act.beneficiaries;
+            const total = (b.men||0) + (b.women||0) + (b.oldMen||0) + (b.oldWomen||0) + (b.newMen||0) + (b.newWomen||0);
+            if (total > 0) {
+                benText = `Total: ${total} (Men: ${(b.men||0)+(b.oldMen||0)+(b.newMen||0)}, Women: ${(b.women||0)+(b.oldWomen||0)+(b.newWomen||0)})`;
+            }
+        }
+        
         item.innerHTML = `
-            <div>
-                <strong>${act.name}</strong>
-                <small>${act.year} - ${act.quarter} | Indicators: ${act.indicatorIds.length} | Targets: ${act.targetEntities ? act.targetEntities.length : act.communityIds.length}</small>
+            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                <div>
+                    <strong style="color: var(--primary); display: block; margin-bottom: 4px; font-size: 0.95rem;">${act.name}</strong>
+                    <small style="color: #64748b;">
+                        <i data-lucide="calendar" style="width: 12px; height: 12px; vertical-align: middle;"></i> ${time}
+                        | Targets: ${act.targetEntities ? act.targetEntities.length : act.communityIds.length}
+                    </small>
+                </div>
+                <span class="chevron" style="color: var(--text-muted); font-size: 0.8rem; margin-top: 2px;">▼</span>
+            </div>
+            <div class="activity-details-global hidden" style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e2e8f0; font-size: 0.8rem; color: var(--text-muted);">
+                <div style="margin-bottom: 6px;"><strong style="color: var(--text-main);">Indicators:</strong> ${indText}</div>
+                <div style="margin-bottom: 6px;"><strong style="color: var(--text-main);">Beneficiaries:</strong> ${benText}</div>
+                <div><strong style="color: var(--text-main);">Knowledge Generated:</strong> ${act.knowledgeGenerated ? '<span style="color:#10b981; font-weight:600;">Yes</span>' : 'No'}</div>
             </div>
         `;
+        
+        item.onclick = () => {
+            const details = item.querySelector('.activity-details-global');
+            const chevron = item.querySelector('.chevron');
+            const isHidden = details.classList.contains('hidden');
+            
+            if (isHidden) {
+                details.classList.remove('hidden');
+                chevron.innerText = '▲';
+            } else {
+                details.classList.add('hidden');
+                chevron.innerText = '▼';
+            }
+        };
+        
         listEl.appendChild(item);
     });
+    if (window.lucide) window.lucide.createIcons();
 }
 // ===== END OF ACTIVITIES =====
 
@@ -2696,6 +2984,7 @@ function renderInterventionMarkers() {
         });
 
         const marker = L.marker(intervention.coords, { icon });
+        marker.bindTooltip(intervention.name);
         const catBadge = intervention.category ? `<span style="font-size:0.72rem;background:${color};color:white;padding:2px 7px;border-radius:20px;display:inline-block;margin-bottom:8px;">${intervention.category}</span>` : '';
         
         const popupContent = `
@@ -2976,6 +3265,15 @@ if (closeInterMapBtn) {
 }
 
 function openInterventionMapView() {
+    const colAct = document.getElementById('col-activities');
+    if (colAct && !colAct.classList.contains('hidden')) {
+        closeActivitiesSidebarView();
+    }
+    const colKnow = document.getElementById('col-knowledge');
+    if (colKnow && !colKnow.classList.contains('hidden')) {
+        closeKnowledgeSidebarView();
+    }
+
     isInterMapMode = true;
     
     // 1. Manage Layers
@@ -3015,6 +3313,402 @@ function closeInterventionMapView() {
     // 3. Reset View
     const countryName = document.getElementById('country-select').value;
     onCountrySelection(countryName, false);
+}
+
+// ===== ACTIVITIES SIDEBAR VIEW =====
+const viewActivitiesBtn = document.getElementById('view-activities-btn');
+const closeActivitiesBtn = document.getElementById('close-activities-view-btn');
+
+if (viewActivitiesBtn) {
+    viewActivitiesBtn.addEventListener('click', openActivitiesSidebarView);
+}
+
+if (closeActivitiesBtn) {
+    closeActivitiesBtn.addEventListener('click', closeActivitiesSidebarView);
+}
+
+function openActivitiesSidebarView() {
+    if (typeof isInterMapMode !== 'undefined' && isInterMapMode) {
+        closeInterventionMapView();
+    }
+    const colKnow = document.getElementById('col-knowledge');
+    if (colKnow && !colKnow.classList.contains('hidden')) {
+        closeKnowledgeSidebarView();
+    }
+
+    // 1. Manage UI
+    sidebar.classList.remove('hidden');
+    document.getElementById('col-main').classList.add('hidden');
+    
+    const colInt = document.getElementById('col-intervention');
+    if (colInt) colInt.classList.add('hidden');
+    
+    const colAct = document.getElementById('col-activities');
+    if (colAct) {
+        colAct.classList.remove('hidden');
+        
+        // 2. Build UI if not built
+        if (!document.getElementById('activities-sidebar-comm-filter')) {
+            colAct.style.display = 'flex';
+            colAct.style.flexDirection = 'column';
+            colAct.style.overflow = 'hidden';
+            
+            let commOptions = '<option value="All">All Communities</option>';
+            communitiesData.sort((a,b) => a.name.localeCompare(b.name)).forEach(c => {
+                commOptions += `<option value="${c.id}">${c.name}</option>`;
+            });
+
+            let headerHtml = `
+                <div class="column-info" style="padding: 20px 20px 10px 20px; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; background: white;">
+                    <h2 id="activities-sidebar-title" style="margin:0; color: var(--primary);">Activities</h2>
+                    <select id="activities-sidebar-comm-filter" class="form-select" style="margin-top: 10px;">
+                        ${commOptions}
+                    </select>
+                    <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 8px; line-height: 1.3;">Click on an activity to view details.</p>
+                </div>
+                <div style="flex: 1; overflow-y: auto; padding: 15px 15px 15px 15px; background: #f8fafc;">
+                    <div id="activities-sidebar-list-container" style="display: flex; flex-direction: column; gap: 12px;"></div>
+                </div>
+            `;
+            colAct.innerHTML = headerHtml;
+
+            document.getElementById('activities-sidebar-comm-filter').addEventListener('change', () => {
+                renderActivitiesSidebarList();
+            });
+        }
+    }
+
+    showBtn.classList.add('hidden');
+    if (closeInterMapBtn) closeInterMapBtn.classList.add('hidden');
+    closeActivitiesBtn.classList.remove('hidden');
+
+    // 3. Render List
+    renderActivitiesSidebarList();
+}
+
+function closeActivitiesSidebarView() {
+    // 1. Manage UI
+    sidebar.classList.remove('hidden');
+    document.getElementById('col-main').classList.remove('hidden');
+    
+    const colAct = document.getElementById('col-activities');
+    if (colAct) colAct.classList.add('hidden');
+    
+    closeActivitiesBtn.classList.add('hidden');
+    resetHighlights();
+}
+
+function renderActivitiesSidebarList() {
+    const listContainer = document.getElementById('activities-sidebar-list-container');
+    const filterEl = document.getElementById('activities-sidebar-comm-filter');
+    const titleEl = document.getElementById('activities-sidebar-title');
+    if (!listContainer) return;
+
+    listContainer.innerHTML = '';
+    
+    let filteredActs = activitiesData;
+    if (filterEl && filterEl.value !== 'All') {
+        filteredActs = activitiesData.filter(a => a.communityIds.includes(filterEl.value));
+    }
+    
+    if (titleEl) {
+        titleEl.innerText = `Activities (${filteredActs.length})`;
+    }
+
+    if (filteredActs.length === 0) {
+        listContainer.innerHTML = '<div style="padding: 20px; color: var(--text-muted); text-align: center; margin-top: 20px;">No activities found for this selection.</div>';
+        return;
+    }
+
+    const sorted = [...filteredActs].sort((a,b) => a.name.localeCompare(b.name));
+
+    sorted.forEach(act => {
+        const time = (act.year && act.quarter) ? `${act.year}-Q${act.quarter}` : 'N/A';
+        const item = document.createElement('div');
+        item.className = 'dash-card sidebar-list-card';
+        item.style.cursor = 'pointer';
+        item.style.padding = '14px';
+        item.style.background = 'white';
+        item.style.borderRadius = '12px';
+        item.style.transition = 'transform 0.2s, box-shadow 0.2s';
+        item.onmouseover = () => { item.style.transform = 'translateY(-2px)'; item.style.boxShadow = '0 8px 16px rgba(0,0,0,0.06)'; };
+        item.onmouseout = () => { item.style.transform = 'translateY(0)'; item.style.boxShadow = '0 2px 6px rgba(0,0,0,0.04)'; };
+
+        const indText = act.indicatorIds && act.indicatorIds.length > 0
+            ? act.indicatorIds.map(id => {
+                for (const cap in indicatorsData) {
+                    if (indicatorsData[cap]) {
+                        const found = indicatorsData[cap].find(i => i.id === id);
+                        if (found) return found.name;
+                    }
+                }
+                return id;
+              }).join(', ')
+            : 'None';
+
+        let benText = 'None specified';
+        if (act.beneficiaries) {
+            const b = act.beneficiaries;
+            const total = (b.men||0) + (b.women||0) + (b.oldMen||0) + (b.oldWomen||0) + (b.newMen||0) + (b.newWomen||0);
+            if (total > 0) {
+                benText = `Total: ${total} (Men: ${(b.men||0)+(b.oldMen||0)+(b.newMen||0)}, Women: ${(b.women||0)+(b.oldWomen||0)+(b.newWomen||0)})`;
+            }
+        }
+
+        const commListHtml = act.communityIds.map(cid => {
+            const comm = communitiesData.find(c => c.id === cid);
+            return comm ? `<li>${comm.name} (${time})</li>` : '';
+        }).join('');
+        
+        item.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                <div style="margin-bottom: 8px;">
+                    <h4 style="margin: 0; color: var(--text-main); font-size: 0.95rem;">${act.name}</h4>
+                    <div style="font-size: 0.75rem; color: #64748b; margin-top: 5px;">
+                        <i data-lucide="calendar" style="width: 12px; height: 12px; vertical-align: middle;"></i> 
+                        ${time} | Targets: ${act.targetEntities ? act.targetEntities.length : act.communityIds.length}
+                    </div>
+                </div>
+                <span class="chevron" style="color: var(--text-muted); font-size: 0.8rem; margin-top: 2px;">▼</span>
+            </div>
+            <div class="activity-details-global hidden" style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e2e8f0; font-size: 0.8rem; color: var(--text-muted);">
+                <div style="margin-bottom: 6px;"><strong style="color: var(--text-main);">Indicators:</strong> ${indText}</div>
+                <div style="margin-bottom: 6px;"><strong style="color: var(--text-main);">Beneficiaries:</strong> ${benText}</div>
+                <div style="margin-bottom: 6px;"><strong style="color: var(--text-main);">Knowledge Generated:</strong> ${act.knowledgeGenerated ? '<span style="color:#10b981; font-weight:600;">Yes</span>' : 'No'}</div>
+                <div style="margin-bottom: 6px;"><strong style="color: var(--text-main);">Communities Undertaken:</strong>
+                    <ul style="margin: 4px 0 0 16px; padding: 0; list-style-type: disc;">
+                        ${commListHtml || '<li>None</li>'}
+                    </ul>
+                </div>
+            </div>
+        `;
+        
+        item.onclick = () => {
+            const details = item.querySelector('.activity-details-global');
+            const chevron = item.querySelector('.chevron');
+            const isHidden = details.classList.contains('hidden');
+            
+            // Optionally close others
+            listContainer.querySelectorAll('.activity-details-global').forEach(d => {
+                if (d !== details) d.classList.add('hidden');
+            });
+            listContainer.querySelectorAll('.chevron').forEach(c => {
+                if (c !== chevron) c.innerText = '▼';
+            });
+            
+            if (isHidden) {
+                details.classList.remove('hidden');
+                chevron.innerText = '▲';
+                highlightCommunities(act.communityIds, false);
+            } else {
+                details.classList.add('hidden');
+                chevron.innerText = '▼';
+                resetHighlights();
+            }
+        };
+        
+        listContainer.appendChild(item);
+    });
+    
+    if (window.lucide) window.lucide.createIcons();
+}
+
+// ===== KNOWLEDGE SIDEBAR VIEW =====
+const viewKnowledgeBtn = document.getElementById('view-knowledge-btn');
+
+if (viewKnowledgeBtn) {
+    viewKnowledgeBtn.addEventListener('click', openKnowledgeSidebarView);
+}
+
+function openKnowledgeSidebarView() {
+    if (typeof isInterMapMode !== 'undefined' && isInterMapMode) {
+        closeInterventionMapView();
+    }
+    
+    if (document.getElementById('col-activities') && !document.getElementById('col-activities').classList.contains('hidden')) {
+        closeActivitiesSidebarView();
+    }
+
+    // 1. Manage UI
+    sidebar.classList.remove('hidden');
+    document.getElementById('col-main').classList.add('hidden');
+    
+    const colInt = document.getElementById('col-intervention');
+    if (colInt) colInt.classList.add('hidden');
+    
+    const colAct = document.getElementById('col-activities');
+    if (colAct) colAct.classList.add('hidden');
+
+    const colKnow = document.getElementById('col-knowledge');
+    if (colKnow) {
+        colKnow.classList.remove('hidden');
+        colKnow.style.display = 'flex';
+        colKnow.style.flexDirection = 'column';
+        colKnow.style.overflow = 'hidden';
+        
+        let commOptions = '<option value="All">All Communities</option>';
+        communitiesData.sort((a,b) => a.name.localeCompare(b.name)).forEach(c => {
+            commOptions += `<option value="${c.id}">${c.name}</option>`;
+        });
+
+        // 2. Build UI if not built
+        if (!document.getElementById('knowledge-sidebar-comm-filter')) {
+            let headerHtml = `
+                <div class="column-info" style="padding: 20px 20px 10px 20px; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; background: white;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <h2 id="knowledge-sidebar-title" style="margin:0; color: #8b5cf6;">Knowledge Hub</h2>
+                        <button class="toggle-btn-small danger" onclick="closeKnowledgeSidebarView()" id="close-knowledge-view-btn" style="margin:0; padding: 4px 8px; width: auto;">&times; Close</button>
+                    </div>
+                    <select id="knowledge-sidebar-comm-filter" class="form-select" style="margin-top: 15px;">
+                        ${commOptions}
+                    </select>
+                    <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 8px; line-height: 1.3;">Click on an item to view resources.</p>
+                </div>
+                <div style="flex: 1; overflow-y: auto; padding: 15px 15px 15px 15px; background: #f8fafc;">
+                    <div id="knowledge-sidebar-list-container" style="display: flex; flex-direction: column; gap: 12px;"></div>
+                </div>
+            `;
+            colKnow.innerHTML = headerHtml;
+
+            document.getElementById('knowledge-sidebar-comm-filter').addEventListener('change', () => {
+                renderKnowledgeSidebarList();
+            });
+        }
+    }
+
+    const closeInterMapBtn = document.getElementById('close-inter-map-btn');
+    if (closeInterMapBtn) closeInterMapBtn.classList.add('hidden');
+    
+    // 3. Render List
+    renderKnowledgeSidebarList();
+}
+
+function closeKnowledgeSidebarView() {
+    sidebar.classList.remove('hidden');
+    document.getElementById('col-main').classList.remove('hidden');
+    
+    const colKnow = document.getElementById('col-knowledge');
+    if (colKnow) colKnow.classList.add('hidden');
+    
+    resetHighlights();
+}
+
+function renderKnowledgeSidebarList() {
+    const listContainer = document.getElementById('knowledge-sidebar-list-container');
+    const filterEl = document.getElementById('knowledge-sidebar-comm-filter');
+    const titleEl = document.getElementById('knowledge-sidebar-title');
+    if (!listContainer) return;
+
+    listContainer.innerHTML = '';
+    
+    // Base filter: Only objects with knowledgeGenerated
+    let knowledgeActs = activitiesData.filter(a => a.knowledgeGenerated);
+
+    if (filterEl && filterEl.value !== 'All') {
+        knowledgeActs = knowledgeActs.filter(a => a.communityIds.includes(filterEl.value));
+    }
+
+    // Group by name similar to main tab
+    const grouped = {};
+    knowledgeActs.forEach(a => {
+        const name = a.name;
+        const time = (a.year && a.quarter) ? `${a.year}-Q${a.quarter}` : 'N/A';
+        if (!grouped[name]) grouped[name] = { 
+            times: [], 
+            commIds: [], 
+            links: [], 
+            desc: a.description || '' 
+        };
+        if (!grouped[name].times.includes(time)) grouped[name].times.push(time);
+        if (a.knowledgeLink && !grouped[name].links.includes(a.knowledgeLink)) grouped[name].links.push(a.knowledgeLink);
+        a.communityIds.forEach(cid => { if (!grouped[name].commIds.includes(cid)) grouped[name].commIds.push(cid); });
+    });
+
+    const keys = Object.keys(grouped).sort((a,b) => a.localeCompare(b));
+    
+    if (titleEl) {
+        titleEl.innerText = `Knowledge Hub (${keys.length})`;
+    }
+
+    if (keys.length === 0) {
+        listContainer.innerHTML = '<div style="padding: 20px; color: var(--text-muted); text-align: center; margin-top: 20px;">No knowledge resources found for this selection.</div>';
+        return;
+    }
+
+    keys.forEach(name => {
+        const item = document.createElement('div');
+        item.className = 'dash-card sidebar-list-card';
+        item.style.cursor = 'pointer';
+        item.style.padding = '14px';
+        item.style.background = 'white';
+        item.style.borderRadius = '12px';
+        item.style.transition = 'transform 0.2s, box-shadow 0.2s';
+        item.style.borderLeft = '4px solid #8b5cf6';
+        item.onmouseover = () => { item.style.transform = 'translateY(-2px)'; item.style.boxShadow = '0 8px 16px rgba(0,0,0,0.06)'; };
+        item.onmouseout = () => { item.style.transform = 'translateY(0)'; item.style.boxShadow = '0 2px 6px rgba(0,0,0,0.04)'; };
+
+        const times = grouped[name].times.sort().join(', ');
+        const links = grouped[name].links;
+        const linkHtml = links.length ? `<div style="margin-top: 8px;">${links.map((l, i) => `<a href="${l}" target="_blank" style="color:#8b5cf6; font-size:0.8rem; text-decoration: underline; margin-right:8px; font-weight:600;" onclick="event.stopPropagation();"><i data-lucide="external-link" style="width:12px; height:12px; margin-bottom:-2px;"></i> Resource ${i+1}</a>`).join('')}</div>` : '<div style="margin-top: 8px; font-size:0.8rem; color:var(--text-muted);">No external links attached.</div>';
+        
+        const commListHtml = grouped[name].commIds.map(cid => {
+            const comm = communitiesData.find(c => c.id === cid);
+            return comm ? `<li>${comm.name}</li>` : '';
+        }).join('');
+
+        item.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                <div style="margin-bottom: 4px;">
+                    <span style="font-weight: 700; color: #8b5cf6; font-size: 0.95rem; display: block; line-height: 1.3;">${name}</span>
+                    <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap;">
+                        <span><i data-lucide="clock" style="width:12px; height:12px; margin-bottom:-2px;"></i> ${times}</span>
+                        <span><i data-lucide="map-pin" style="width:12px; height:12px; margin-bottom:-2px;"></i> ${grouped[name].commIds.length} Communities</span>
+                    </div>
+                </div>
+                <div style="color: var(--text-muted); font-size: 0.8rem; font-weight: 700; background: #f8fafc; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0;" class="chevron">▼</div>
+            </div>
+            <div class="expand-details hidden" style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e2e8f0;">
+                <div style="font-size: 0.85rem; color: var(--text-main); margin-bottom: 8px;">
+                    <strong>Description:</strong> ${grouped[name].desc || 'No description provided.'}
+                </div>
+                ${linkHtml}
+                <div style="font-size: 0.85rem; color: var(--text-main); margin-top: 12px;">
+                    <strong>Communities Undertaken:</strong>
+                    <ul style="margin: 5px 0 0 20px; color: var(--text-muted); padding-left:20px;">
+                        ${commListHtml}
+                    </ul>
+                </div>
+            </div>
+        `;
+
+        item.onclick = () => {
+            const details = item.querySelector('.expand-details');
+            const chevron = item.querySelector('.chevron');
+            const isHidden = details.classList.contains('hidden');
+            
+            // Close others
+            listContainer.querySelectorAll('.expand-details').forEach(d => {
+                if (d !== details) d.classList.add('hidden');
+            });
+            listContainer.querySelectorAll('.chevron').forEach(c => {
+                if (c !== chevron) c.innerText = '▼';
+            });
+            
+            if (isHidden) {
+                details.classList.remove('hidden');
+                chevron.innerText = '▲';
+                highlightCommunities(grouped[name].commIds, true);
+            } else {
+                details.classList.add('hidden');
+                chevron.innerText = '▼';
+                resetHighlights();
+            }
+        };
+        
+        listContainer.appendChild(item);
+    });
+    
+    if (window.lucide) window.lucide.createIcons();
 }
 
 // Universal handler for modal close buttons

@@ -1,6 +1,6 @@
 const staticData = {
     countries: [
-        { name: "Nepal", center: [28.6549, 81.124], zoom: 10 }
+        { name: "Nepal", center: [28.6549, 81.124], zoom: 10, brief: "Nepal is highly vulnerable to natural and human-induced hazards, notably floods, landslides, and heatwaves. This dashboard monitors ongoing resilience and risk management efforts across various communities, aiming to strengthen adaptive capacity at both the household and systemic levels." }
     ],
     capitals: [
         { id: "human", name: "Human Capital", color: "#3B82F6", description: "Skills, knowledge, and health that enable people to work and pursue their goals. Includes education, health access, and labor productivity." },

@@ -24,6 +24,9 @@
     <button id="close-inter-map-btn" class="floating-map-btn hidden">
         <i data-lucide="x"></i> Close Intervention Map
     </button>
+    <button id="close-activities-view-btn" class="floating-map-btn hidden" style="left: 60%;">
+        <i data-lucide="x"></i> Close Activities View
+    </button>
 
     <button id="show-sidebar-btn" class="sidebar-toggle-btn hidden" title="Show Sidebar">
         <i data-lucide="chevron-left"></i>
@@ -42,7 +45,8 @@
                         Quick Actions <i data-lucide="chevron-down"></i>
                     </button>
                     <div class="dropdown-content">
-                        <button id="quick-activities-btn" class="dropdown-item" style="color: #10b981;">📋 Activities</button>
+                        <button id="view-activities-btn" class="dropdown-item" style="color: #10b981;">📋 Activities List</button>
+                        <button id="view-knowledge-btn" class="dropdown-item" style="color: #8b5cf6;">📚 Knowledge Hub</button>
                         <button id="manage-communities-btn" class="dropdown-item admin-only hidden">Manage Communities</button>
                         <button id="manage-activities-btn" class="dropdown-item admin-only hidden">Manage Activities</button>
                         <button id="manage-users-btn" class="dropdown-item admin-only hidden">Manage Users</button>
@@ -81,11 +85,11 @@
                     <!-- Admin Edit Button (injected by JS) -->
                     <div id="admin-edit-area"></div>
                 </div>
-
                 <div class="tabs">
                     <button class="tab-btn active" data-tab="score" data-col="main">CRMC Grading</button>
-                    <button class="tab-btn" data-tab="demographics" data-col="main">Demographics</button>
+                    <button class="tab-btn" data-tab="demographics" data-col="main">Overview</button>
                     <button class="tab-btn" data-tab="activities" data-col="main">Activities</button>
+                    <button class="tab-btn" data-tab="knowledge" data-col="main">Knowledge Hub</button>
                 </div>
 
                 <div class="tab-content" id="tab-score-main">
@@ -93,9 +97,11 @@
                         <div id="gauge-group-main" class="hidden">
                             <div class="gauge-container">
                                 <canvas id="gauge-canvas-main"></canvas>
-                                <div class="gauge-labels">
-                                    <span id="label-t0-main">0 (D)</span>
-                                    <span id="label-t1-main">100 (A)</span>
+                                <div class="gauge-labels" style="display: flex; justify-content: space-between; padding: 0 30px; font-weight: 600;">
+                                    <span>0</span>
+                                    <span>33</span>
+                                    <span>67</span>
+                                    <span>100</span>
                                 </div>
                                 <div class="gauge-toggles">
                                     <label><input type="checkbox" id="show-t0-main" checked> T0</label>
@@ -118,7 +124,10 @@
                 </div>
 
                 <div class="tab-content hidden" id="tab-demographics-main">
-                    <div id="demographics-text-main" class="info-card"></div>
+                    <div class="tab-scroll-area" style="padding: 10px 20px;">
+                        <div id="demographics-text-main" class="info-card" style="margin: 0 0 15px 0;"></div>
+                        <div id="theoretical-definitions-main" class="info-card" style="margin: 0; display: none;"></div>
+                    </div>
                 </div>
 
                 <div class="tab-content hidden" id="tab-activities-main">
@@ -136,6 +145,16 @@
             
             <!-- Column 2: Intervention Details -->
             <div class="sidebar-column hidden" id="col-intervention">
+                <!-- Content gets injected by JS -->
+            </div>
+
+            <!-- Column 3: Activities Details -->
+            <div class="sidebar-column hidden" id="col-activities">
+                <!-- Content gets injected by JS -->
+            </div>
+            
+            <!-- Column 4: Knowledge Hub -->
+            <div class="sidebar-column hidden" id="col-knowledge">
                 <!-- Content gets injected by JS -->
             </div>
 

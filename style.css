@@ -438,7 +438,7 @@ h2 {
 }
 
 .hidden {
-    display: none;
+    display: none !important;
 }
 
 /* Global Activity Styles */
@@ -614,18 +614,18 @@ h2 {
 .demo-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
-    margin-bottom: 20px;
+    gap: 8px;
+    margin-bottom: 12px;
 }
 
 .demo-item {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
     background: #f8fafc;
-    padding: 12px;
+    padding: 8px 12px;
     border-radius: 8px;
-    border: 1px solid #f1f5f9;
+    border: 1px solid #e2e8f0;
 }
 
 .demo-item i {
@@ -1478,3 +1478,20 @@ h2 {
     font-weight: 600;
 }
 
+.comm-label-tooltip {
+    background: transparent !important;
+    color: #0f172a !important; /* Very dark slate for contrast */
+    border: none !important;
+    box-shadow: none !important;
+    font-weight: 800 !important;
+    font-size: 0.9rem !important;
+    text-shadow: 
+        -2px -2px 0 #fff,  
+         2px -2px 0 #fff,
+        -2px  2px 0 #fff,
+         2px  2px 0 #fff,
+         0px  2px 4px rgba(0,0,0,0.5) !important;
+}
+.comm-label-tooltip::before {
+    display: none !important; /* Hide the tooltip arrow snippet completely */
+}
