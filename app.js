@@ -150,7 +150,18 @@ function mapCSVToCommunity(row) {
         country: row.Country,
         province: row.Province,
         district: row.District,
-        municipality: row.Municipality || row.Palika || "",
+        municipality: (() => {
+            let m = (row.Municipality || row.Palika || "").trim();
+            if (!m && row.Description) {
+                const d = row.Description;
+                if (d.toLowerCase().includes('palika:')) {
+                    m = d.split(/palika:/i)[1].split(',')[0].trim();
+                } else if (d.toLowerCase().includes('municipality:')) {
+                    m = d.split(/municipality:/i)[1].split(',')[0].trim();
+                }
+            }
+            return m.replace(/Palika/gi, "Municipality").trim();
+        })(),
         coords: [parseFloat(row.Lat), parseFloat(row.Lng)],
         t0_score: parseFloat(row.T0_Score) || 0,
         t1_score: "N/A",
@@ -199,7 +210,7 @@ function mapCSVToActivity(row) {
             newMen: parseInt(row.NewMen) || 0,
             newWomen: parseInt(row.NewWomen) || 0
         },
-        municipality: row.Municipality || "",
+        municipality: (row.Municipality || row.Palika || "").replace(/Palika/gi, "Municipality").trim(),
         district: row.District || "",
         province: row.Province || "",
         country: row.Country || ""
@@ -2633,33 +2644,68 @@ function openDashboard() {
 }
 
 function populateDashboardFilters() {
-    const countrySelect = document.getElementById('dash-filter-country'); // In case not there
-    const provSelect = document.getElementById('dash-filter-province');
-    const distSelect = document.getElementById('dash-filter-district');
-    const muniSelect = document.getElementById('dash-filter-municipality');
-    const commSelect = document.getElementById('dash-filter-community');
+    const countryEl = document.getElementById('dash-filter-country');
+    const provEl = document.getElementById('dash-filter-province');
+    const distEl = document.getElementById('dash-filter-district');
+    const muniEl = document.getElementById('dash-filter-municipality');
+    const commEl = document.getElementById('dash-filter-community');
 
-    // Simple unique extraction
-    const provinces = [...new Set(communitiesData.map(c => c.province))].filter(Boolean).sort();
-    const districts = [...new Set(communitiesData.map(c => c.district))].filter(Boolean).sort();
-    const municipalities = [...new Set(communitiesData.map(c => c.municipality))].filter(Boolean).sort();
+    if (!countryEl || !provEl || !distEl || !muniEl || !commEl) return;
 
-    provSelect.innerHTML = '<option value="All">All Provinces</option>' + provinces.map(p => `<option value="${p}">${p}</option>`).join('');
-    distSelect.innerHTML = '<option value="All">All Districts</option>' + districts.map(d => `<option value="${d}">${d}</option>`).join('');
-    muniSelect.innerHTML = '<option value="All">All Municipalities</option>' + municipalities.map(m => `<option value="${m}">${m}</option>`).join('');
-    
-    // For communities, ensure unique ID but show name + context for duplicates
-    commSelect.innerHTML = '<option value="All">All Communities</option>' + communitiesData.map(c => {
-        const duplicates = communitiesData.filter(oc => oc.name === c.name);
+    // 1. Countries
+    const curCountry = countryEl.value || 'All';
+    const countries = [...new Set(communitiesData.map(c => c.country))].filter(Boolean).sort();
+    countryEl.innerHTML = '<option value="All">All Countries</option>' + countries.map(c => `<option value="${c}">${c}</option>`).join('');
+    if (countries.includes(curCountry)) countryEl.value = curCountry;
+    else countryEl.value = 'All';
+
+    let filtered = communitiesData;
+
+    // 2. Provinces
+    const curProv = provEl.value || 'All';
+    if (countryEl.value !== 'All') filtered = filtered.filter(c => c.country === countryEl.value);
+    const provinces = [...new Set(filtered.map(c => c.province))].filter(Boolean).sort();
+    provEl.innerHTML = '<option value="All">All Provinces</option>' + provinces.map(p => `<option value="${p}">${p}</option>`).join('');
+    if (provinces.includes(curProv)) provEl.value = curProv;
+    else provEl.value = 'All';
+
+    // 3. Districts
+    const curDist = distEl.value || 'All';
+    if (provEl.value !== 'All') filtered = filtered.filter(c => c.province === provEl.value);
+    const districts = [...new Set(filtered.map(c => c.district))].filter(Boolean).sort();
+    distEl.innerHTML = '<option value="All">All Districts</option>' + districts.map(d => `<option value="${d}">${d}</option>`).join('');
+    if (districts.includes(curDist)) distEl.value = curDist;
+    else distEl.value = 'All';
+
+    // 4. Municipalities
+    const curMuni = muniEl.value || 'All';
+    if (distEl.value !== 'All') filtered = filtered.filter(c => c.district === distEl.value);
+    const municipalities = [...new Set(filtered.map(c => c.municipality))].filter(Boolean).sort();
+    muniEl.innerHTML = '<option value="All">All Municipalities</option>' + municipalities.map(m => `<option value="${m}">${m}</option>`).join('');
+    if (municipalities.includes(curMuni)) muniEl.value = curMuni;
+    else muniEl.value = 'All';
+
+    // 5. Communities
+    const curComm = commEl.value || 'All';
+    if (muniEl.value !== 'All') filtered = filtered.filter(c => c.municipality === muniEl.value);
+    commEl.innerHTML = '<option value="All">All Communities</option>' + filtered.map(c => {
+        const duplicates = filtered.filter(oc => oc.name === c.name);
         const displayName = duplicates.length > 1 ? `${c.name} (${c.district}, ${c.country})` : c.name;
         return `<option value="${c.id}">${displayName}</option>`;
     }).join('');
+    if (filtered.some(c => c.id === curComm)) commEl.value = curComm;
+    else commEl.value = 'All';
 
-    // Dynamically populate Year dropdown from activitiesData
+    // 6. Years
     const yearSelect = document.getElementById('dash-filter-year');
-    const allYears = [...new Set(activitiesData.flatMap(a => (a.yearsQuarters || []).map(yq => yq.split('-')[0])))];
-    const years = allYears.filter(Boolean).sort((a, b) => b - a);
-    yearSelect.innerHTML = '<option value="All">All Years</option>' + years.map(y => `<option value="${y}">${y}</option>`).join('');
+    if (yearSelect) {
+        const curYear = yearSelect.value || 'All';
+        const allYears = [...new Set(activitiesData.flatMap(a => (a.yearsQuarters || []).map(yq => yq.split('-')[0])))];
+        const years = allYears.filter(Boolean).sort((a,b) => b - a);
+        yearSelect.innerHTML = '<option value="All">All Years</option>' + years.map(y => `<option value="${y}">${y}</option>`).join('');
+        if (years.includes(curYear)) yearSelect.value = curYear;
+        else yearSelect.value = 'All';
+    }
 }
 
 // Auto-refresh filters
@@ -2671,6 +2717,7 @@ function populateDashboardFilters() {
 document.getElementById('dash-refresh-btn').addEventListener('click', updateDashboard);
 
 function updateDashboard() {
+    populateDashboardFilters();
     const country = document.getElementById('dash-filter-country').value;
     const prov = document.getElementById('dash-filter-province').value;
     const dist = document.getElementById('dash-filter-district').value;
@@ -2690,10 +2737,6 @@ function updateDashboard() {
 
     // Stats
     document.getElementById('dash-stat-communities').innerText = filteredComms.length;
-    const avgT0 = filteredComms.length ? (filteredComms.reduce((sum, c) => sum + c.t0_score, 0) / filteredComms.length).toFixed(1) : 0;
-    const avgT1 = filteredComms.length ? (filteredComms.reduce((sum, c) => sum + c.t1_score, 0) / filteredComms.length).toFixed(1) : 0;
-    document.getElementById('dash-stat-t0').innerText = avgT0;
-    document.getElementById('dash-stat-t1').innerText = avgT1;
 
     // Aggregate Community Demographics
     const aggDemo = { population: 0, male: 0, female: 0, children: 0, elderly: 0 };
@@ -3558,18 +3601,31 @@ function closeInterventionMapView() {
 const viewOverviewBtn = document.getElementById('view-overview-btn');
 if (viewOverviewBtn) {
     viewOverviewBtn.addEventListener('click', () => {
-        if (typeof isInterMapMode !== 'undefined' && isInterMapMode) {
-            closeInterventionMapView();
+        // Force reset all sidebar states
+        isInterMapMode = false;
+        if (typeof isActivitiesMode !== 'undefined') isActivitiesMode = false;
+        isKnowledgeMode = false;
+
+        // Ensure sidebar and global filters are visible
+        if (sidebar) sidebar.classList.remove('hidden');
+        const gf = document.getElementById('global-filters-container');
+        if (gf) gf.classList.remove('hidden');
+        const cm = document.getElementById('col-main');
+        if (cm) cm.classList.remove('hidden');
+
+        // Hide other specialized columns
+        ['col-intervention', 'col-activities', 'col-knowledge'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.add('hidden');
+        });
+
+        // Reset map layers (ensure standard community/country markers)
+        if (!map.hasLayer(markersGroup)) map.addLayer(markersGroup);
+        if (typeof interventionsGroup !== 'undefined' && map.hasLayer(interventionsGroup)) {
+            map.removeLayer(interventionsGroup);
         }
-        const colAct = document.getElementById('col-activities');
-        if (colAct && !colAct.classList.contains('hidden')) {
-            closeActivitiesSidebarView();
-        }
-        const colKnow = document.getElementById('col-knowledge');
-        if (colKnow && !colKnow.classList.contains('hidden')) {
-            closeKnowledgeSidebarView();
-        }
-        
+
+        // Return everything to Global view
         onCountrySelection('All');
     });
 }
