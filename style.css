@@ -1065,96 +1065,75 @@ h2 {
    MOBILE PORTRAIT RESPONSIVE STYLES
    Max-width: 600px
    ============================================= */
-@media (max-width: 600px) {
+/* Unified Mobile/Tablet Portrait Styles (under 768px) */
+@media (max-width: 768px) {
+    body, html {
+        overflow: hidden;
+    }
 
-    /* --- Sidebar: full-width bottom drawer --- */
-    .sidebar {
-        top: auto;
-        bottom: 0;
-        right: 0;
-        left: 0;
+    #map {
+        height: 50% !important;
         width: 100% !important;
-        height: 70vh;
-        border-radius: 20px 20px 0 0;
-        border-bottom: none;
+        position: fixed !important;
+        top: 0;
+        left: 0;
+        z-index: 1;
+    }
+
+    .sidebar {
+        position: fixed !important;
+        top: 50% !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        width: 100% !important;
+        height: 50% !important;
+        border-radius: 20px 20px 0 0 !important;
+        margin: 0 !important;
+        z-index: 1000;
+        box-shadow: 0 -5px 15px rgba(0,0,0,0.1);
+        transform: translateY(0);
     }
 
     .sidebar.hidden {
-        transform: translateY(calc(100% + 10px));
+        transform: translateY(100%) !important;
+    }
+    
+    /* Toggle button positioning */
+    .sidebar-toggle-btn {
+        top: auto !important;
+        bottom: 20px !important;
+        right: 20px !important;
+        z-index: 999;
     }
 
-    /* --- Header controls: compact horizontal scroll --- */
-    .sidebar-header {
-        padding: 10px 14px;
+    .sidebar-collapse-icon {
+        display: none !important; /* Hide the small side-toggle on mobile */
     }
 
+    /* Fixed floating buttons on mobile */
+    .sidebar-toggle-fixed {
+         top: auto !important;
+         bottom: 20px !important;
+         left: 50% !important;
+         transform: translateX(-50%) !important;
+         width: auto !important;
+         padding: 10px 20px !important;
+         z-index: 999;
+    }
+
+    /* Header controls: ensure visibility for dropdowns */
     .header-controls {
-        flex-wrap: nowrap;
-        overflow-x: auto;
-        gap: 6px;
-        padding-bottom: 4px;
-        -webkit-overflow-scrolling: touch;
-        scrollbar-width: none;
+        flex-wrap: wrap !important; /* Allow wrapping instead of clipping */
+        overflow: visible !important;
+        gap: 8px !important;
+        padding-bottom: 5px;
     }
 
     .header-controls::-webkit-scrollbar {
         display: none;
     }
 
-    .header-controls .toggle-btn {
-        flex: 0 0 auto;
-        white-space: nowrap;
-        font-size: 0.75rem;
-        padding: 6px 10px;
-    }
-
-    /* --- Show sidebar button: bottom-left on mobile --- */
-    .sidebar-toggle-fixed {
-        top: auto;
-        bottom: 20px;
-        right: auto;
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 10px 24px;
-        font-size: 0.85rem;
-        border-radius: 30px;
-        white-space: nowrap;
-        box-shadow: 0 4px 20px rgba(37,99,235,0.25);
-    }
-
-    /* --- Community name heading --- */
-    .column-info {
-        padding: 12px 16px;
-    }
-
-    h2 {
-        font-size: 1.1rem;
-    }
-
-    /* --- Country / community dropdowns stack vertically --- */
-    .country-zoom {
-        flex-direction: column;
-        gap: 6px;
-    }
-
-    /* --- Tabs: scrollable, smaller font --- */
-    .tabs {
-        overflow-x: auto;
-        flex-wrap: nowrap;
-        -webkit-overflow-scrolling: touch;
-        scrollbar-width: none;
-    }
-
-    .tabs::-webkit-scrollbar { display: none; }
-
-    .tab-btn {
-        flex: 0 0 auto;
-        padding: 9px 14px;
-        font-size: 0.78rem;
-        white-space: nowrap;
-    }
-
-    /* --- Resilience scroll area --- */
     .resilience-scroll-area,
     .tab-scroll-area {
         padding: 12px;

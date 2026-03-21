@@ -4153,3 +4153,10 @@ document.addEventListener('click', (e) => {
 
 // Start initialization
 initData();
+
+// Handle map resizing on mobile layout shifts
+window.addEventListener('resize', () => {
+    if (typeof map !== 'undefined' && map) {
+        map.invalidateSize();
+    }
+});
