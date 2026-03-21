@@ -21,12 +21,8 @@
 
 <body>
     <div id="map"></div>
-    <button id="close-inter-map-btn" class="floating-map-btn hidden">
-        <i data-lucide="x"></i> Close Intervention Map
-    </button>
-    <button id="close-activities-view-btn" class="floating-map-btn hidden" style="left: 60%;">
-        <i data-lucide="x"></i> Close Activities View
-    </button>
+
+
 
     <button id="show-sidebar-btn" class="sidebar-toggle-btn hidden" title="Show Sidebar">
         <i data-lucide="chevron-left"></i>
@@ -45,6 +41,7 @@
                         Quick Actions <i data-lucide="chevron-down"></i>
                     </button>
                     <div class="dropdown-content">
+                        <button id="view-overview-btn" class="dropdown-item" style="color: #2563eb;">🏠 Overview</button>
                         <button id="view-activities-btn" class="dropdown-item" style="color: #10b981;">📋 Activities List</button>
                         <button id="view-knowledge-btn" class="dropdown-item" style="color: #8b5cf6;">📚 Knowledge Hub</button>
                         <button id="manage-communities-btn" class="dropdown-item admin-only hidden">Manage Communities</button>
@@ -68,12 +65,12 @@
         </div>
 
         <div class="sidebar-content-wrapper">
-            <div class="global-filters" style="padding: 15px 20px 0;">
+            <div id="global-filters-container" class="global-filters" style="padding: 15px 20px 0;">
                 <div class="country-zoom">
                     <select id="country-select" style="min-width: 140px; padding: 6px 10px; border-radius: 8px; border: 1px solid #e2e8f0; background: white; font-weight: 600; color: var(--text-main); cursor: pointer;">
                         <option value="All">All Countries</option>
                     </select>
-                    <select id="community-select">
+                    <select id="community-select" style="min-width: 140px; padding: 6px 10px; border-radius: 8px; border: 1px solid #e2e8f0; background: white; font-weight: 600; color: var(--text-main); cursor: pointer;">
                         <option value="All">All Communities</option>
                     </select>
                 </div>
@@ -87,7 +84,7 @@
                 </div>
                 <div class="tabs">
                     <button class="tab-btn active" data-tab="score" data-col="main">CRMC Grading</button>
-                    <button class="tab-btn" data-tab="demographics" data-col="main">Overview</button>
+                    <button class="tab-btn" data-tab="demographics" data-col="main">Demography</button>
                     <button class="tab-btn" data-tab="activities" data-col="main">Activities</button>
                     <button class="tab-btn" data-tab="knowledge" data-col="main">Knowledge Hub</button>
                 </div>
@@ -821,9 +818,9 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="communities_static.js?v=2"></script>
     <script src="activities_static.js?v=2"></script>
+    <script src="knowledge_static.js?v=2"></script>
     <script src="interventions_static.js?v=2"></script>
     <script src="data.js"></script>
-    <script src="activities.js"></script>
     <script src="app.js"></script>
 
 

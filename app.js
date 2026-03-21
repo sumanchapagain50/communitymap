@@ -84,6 +84,33 @@ async function initData() {
         console.error("Error loading static activities data.", e);
     }
 
+    // 2.5 Load Knowledge from Static JS
+    try {
+        if (typeof knowledgeDataStaticRaw !== 'undefined') {
+            const csvText = knowledgeDataStaticRaw;
+            const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+            if (parsed.data) {
+                const csvKnows = parsed.data.map(row => ({
+                    id: row.Id,
+                    title: row.Title,
+                    url: row.Url,
+                    communityIds: row.CommunityIds ? row.CommunityIds.split(';') : [],
+                    activityIds: row.ActivityIds ? row.ActivityIds.split(';') : [],
+                    indicatorIds: row.IndicatorIds ? row.IndicatorIds.split(';') : []
+                }));
+                
+                const savedKnows = isEditMode ? JSON.parse(localStorage.getItem('crmc_external_knowledge') || '[]') : [];
+                const knowMap = new Map();
+                csvKnows.forEach(k => knowMap.set(k.id, k));
+                // Saved ones take precedence
+                savedKnows.forEach(k => knowMap.set(k.id, k));
+                externalKnowledgeLinks = Array.from(knowMap.values());
+            }
+        }
+    } catch (e) {
+        console.error("Error loading static knowledge data.", e);
+    }
+
     // 3. Load Interventions from Static JS
     try {
         if (typeof interventionsDataStaticRaw !== 'undefined') {
@@ -94,7 +121,8 @@ async function initData() {
                     id: row.Id,
                     name: row.Name,
                     coords: [parseFloat(row.Lat), parseFloat(row.Lng)],
-                    communityIds: row.CommunityIds ? row.CommunityIds.split(';') : []
+                    communityIds: row.CommunityIds ? row.CommunityIds.split(';') : [],
+                    yearsQuarters: row.YearsQuarters ? row.YearsQuarters.split(';') : ['2025-Q1']
                 }));
                 
                 if (isEditMode) {
@@ -159,6 +187,10 @@ function mapCSVToActivity(row) {
         indicatorIds: row.IndicatorIds ? row.IndicatorIds.split(';') : [],
         communityIds: row.CommunityIds ? row.CommunityIds.split(';') : [],
         knowledgeGenerated: row.KnowledgeGenerated === 'true',
+        knowledgeTitle: row.KnowledgeTitle || "",
+        yearsQuarters: row.YearsQuarters ? row.YearsQuarters.split(';') : (row.Year && row.Quarter ? [`${row.Year}-Q${row.Quarter.replace('Q','')}`] : ['2025-Q1']),
+        description: row.Description || "",
+        knowledgeLink: row.KnowledgeLink || "",
         beneficiaries: {
             men: parseInt(row.Men) || 0,
             women: parseInt(row.Women) || 0,
@@ -271,7 +303,8 @@ function resolveConflicts(conflicts, savedMap) {
 
 
 // Global state variables
-let externalKnowledgeLinks = isEditMode ? JSON.parse(localStorage.getItem('crmc_external_knowledge') || '[]') : [];
+// Global state variables
+let externalKnowledgeLinks = [];
 const defaultUsers = [{ name: 'admin', pass: '123', role: 'KRO' }];
 let usersData = isEditMode ? JSON.parse(localStorage.getItem('crmc_users') || JSON.stringify(defaultUsers)) : defaultUsers;
 let indicatorsData;
@@ -337,7 +370,19 @@ function setupUIHandles() {
     allScoresGrid = document.getElementById('all-scores-grid');
 
     communitySelect = document.getElementById('community-select');
-    
+    if (communitySelect) {
+        communitySelect.addEventListener('change', (e) => {
+            const cid = e.target.value;
+            const comm = cid === 'All' ? null : communitiesData.find(c => c.id === cid);
+            renderColumn(comm, 'main');
+            if (comm) {
+                map.flyTo(comm.coords, 14, { animate: true, duration: 1.5 });
+                highlightCommunities([cid], true, true);
+            } else {
+                resetHighlights();
+            }
+        });
+    }
     // Reveal Admin Login button only if in Edit Mode
     if (isEditMode && loginBtn) {
         loginBtn.classList.remove('hidden');
@@ -490,12 +535,9 @@ function setupIndicatorFilterListeners() {
         const el = document.getElementById(`filter-${type}-${side}`);
         if (el) {
             el.addEventListener('change', () => {
-                // Re-render current column depending on active dropdown
-                const commSelect = document.getElementById('community-select');
-                const activeComm = (commSelect && commSelect.value !== 'All') 
-                    ? communitiesData.find(c => c.id === commSelect.value) || null 
-                    : null;
-                renderColumn(activeComm, side);
+                const commId = communitySelect ? communitySelect.value : 'All';
+                const comm = (commId === 'All') ? null : communitiesData.find(c => c.id === commId);
+                renderColumn(comm, side); 
             });
         }
     });
@@ -1120,36 +1162,71 @@ function resetHighlights() {
 }
 
 function highlightCommunities(communityIds, fitBounds = true, hideOthers = true) {
+    // If we're currently in Global Mode (no community markers), clear country badges
+    const inGlobalMode = Object.keys(communityMarkers).length === 0;
+    if (inGlobalMode) {
+        markersGroup.clearLayers();
+    }
+
+    // Ensure markers exist for all target IDs
+    communityIds.forEach(id => {
+        if (!communityMarkers[id]) {
+            const comm = communitiesData.find(c => c.id === id);
+            if (comm) {
+                const marker = L.marker(comm.coords);
+                marker.bindTooltip(comm.name);
+                marker.on('click', () => {
+                    resetHighlights();
+                    if (typeof isInterMapMode !== 'undefined' && isInterMapMode) closeInterventionMapView();
+                    const colAct = document.getElementById('col-activities');
+                    if (colAct && !colAct.classList.contains('hidden')) closeActivitiesSidebarView();
+                    const colKnow = document.getElementById('col-knowledge');
+                    if (colKnow && !colKnow.classList.contains('hidden')) closeKnowledgeSidebarView();
+
+                    renderColumn(comm, 'main');
+                    sidebar.classList.remove('hidden');
+                    showBtn.classList.add('hidden');
+                });
+                markersGroup.addLayer(marker);
+                communityMarkers[id] = marker;
+            }
+        }
+    });
+
     resetHighlights();
     const markersToFit = [];
     Object.keys(communityMarkers).forEach(id => {
         const m = communityMarkers[id];
         const icon = m.getElement();
-        if (icon) {
-            if (communityIds.includes(id)) {
+        
+        // Ensure communityIds is an array (to handle single ID pass safely)
+        const ids = Array.isArray(communityIds) ? communityIds : [communityIds];
+
+        if (ids.includes(id)) {
+            if (icon) {
                 icon.style.display = '';
                 icon.classList.add('leaflet-marker-highlighted');
-                markersToFit.push(m.getLatLng());
-                
-                const comm = communitiesData.find(c => c.id === id);
-                if (comm) {
-                    m.unbindTooltip();
-                    m.bindTooltip(comm.name, {
-                        permanent: true, 
-                        direction: 'right', 
-                        className: 'comm-label-tooltip',
-                        offset: [15, -20]
-                    }).openTooltip();
-                }
-            } else if (hideOthers) {
-                icon.style.display = 'none';
             }
+            markersToFit.push(m.getLatLng());
+            
+            const comm = communitiesData.find(c => c.id === id);
+            if (comm) {
+                m.unbindTooltip();
+                m.bindTooltip(comm.name, {
+                    permanent: true, 
+                    direction: 'right', 
+                    className: 'comm-label-tooltip',
+                    offset: [15, -20]
+                }).openTooltip();
+            }
+        } else if (hideOthers) {
+            if (icon) icon.style.display = 'none';
         }
     });
 
     if (fitBounds && markersToFit.length > 0) {
-        const bounds = L.latLngBounds(markersToFit);
-        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 8 });
+        const bounds = L.latLngBounds(markersToFit).pad(0.3);
+        map.fitBounds(bounds, { animate: true, duration: 1.5 });
     }
 }
 
@@ -1219,11 +1296,10 @@ function initTabs() {
                     if (filtersDiv) filtersDiv.classList.add('hidden');
                     if (titleHeading) titleHeading.innerText = 'Activities';
                     
-                    // Render activities list for the globally selected community
-                    const comm = (globalCommSelect && globalCommSelect.value !== 'All') 
-                        ? communitiesData.find(c => c.id === globalCommSelect.value) 
-                        : null;
                     const cFilter = document.getElementById('country-select') ? document.getElementById('country-select').value : 'All';
+                    const comm = (globalCommSelect && globalCommSelect.value !== 'All') 
+                            ? communitiesData.find(c => c.id === globalCommSelect.value) 
+                            : null;
                     renderActivities(comm, 'activities-list-main', cFilter);
                 } else {
                     if (filtersDiv) filtersDiv.classList.remove('hidden');
@@ -1353,7 +1429,7 @@ function renderKnowledge(community, targetId) {
         const grouped = {};
         related.forEach(a => {
             const name = a.name;
-            const time = (a.year && a.quarter) ? `${a.year}-Q${a.quarter}` : 'N/A';
+            const time = a.yearsQuarters ? a.yearsQuarters.join(', ') : 'N/A';
             if (!grouped[name]) grouped[name] = [];
             grouped[name].push(time);
         });
@@ -1386,7 +1462,7 @@ function renderKnowledge(community, targetId) {
         const grouped = {};
         confirmedActs.forEach(a => {
             const name = a.name;
-            const time = (a.year && a.quarter) ? `${a.year}-Q${a.quarter}` : 'N/A';
+            const time = a.yearsQuarters ? a.yearsQuarters.join(', ') : 'N/A';
             if (!grouped[name]) grouped[name] = { times: [], commIds: [], links: [] };
             grouped[name].times.push(time);
             if (a.knowledgeLink) grouped[name].links.push(a.knowledgeLink);
@@ -1430,7 +1506,7 @@ function renderDemographics(community, targetId) {
 
     if (community) {
         d = community.demographics;
-        title = "Community Demographics";
+        title = "Community Demography";
     } else {
         // Aggregate totals for all/filtered communities
         const currentCountry = document.getElementById('country-select').value;
@@ -1449,8 +1525,8 @@ function renderDemographics(community, targetId) {
             return acc;
         }, { total: 0, male: 0, female: 0, children: 0, elderly: 0, disabilities: 0 });
 
-        d.description = `Aggregate data across ${filtered.length} communities in ${currentCountry === "All" ? "all regions" : currentCountry}.`;
-        title = `Total Demographics (${currentCountry})`;
+        d.description = `Aggregated data across ${filtered.length} communities in ${currentCountry === "All" ? "all countries" : currentCountry}.`;
+        title = `Demography- ${currentCountry}`;
     }
 
     container.innerHTML = `
@@ -1537,7 +1613,7 @@ function renderActivities(community, targetId, countryFilter = "All") {
     if (community) {
         const related = activitiesData.filter(a => a.communityIds.includes(community.id));
         related.forEach(act => {
-            const time = (act.year && act.quarter) ? `${act.year}-Q${act.quarter}` : 'N/A';
+            const time = act.yearsQuarters ? act.yearsQuarters.join(', ') : 'N/A';
             const li = document.createElement('li');
             li.style.cursor = 'pointer';
             li.style.transition = 'transform 0.2s, box-shadow 0.2s';
@@ -1600,7 +1676,7 @@ function renderActivities(community, targetId, countryFilter = "All") {
                 if (isHidden) {
                     details.classList.remove('hidden');
                     chevron.innerText = '▲';
-                    highlightCommunities(act.communityIds, false);
+                    highlightCommunities(act.communityIds, true);
                 } else {
                     details.classList.add('hidden');
                     chevron.innerText = '▼';
@@ -1640,7 +1716,7 @@ function renderActivities(community, targetId, countryFilter = "All") {
                             };
                             existing.instances.push(inst);
                         }
-                        const time = (a.year && a.quarter) ? `${a.year}-Q${a.quarter}` : 'N/A';
+                        const time = a.yearsQuarters ? a.yearsQuarters.join(', ') : 'N/A';
                         if (!inst.periods.includes(time)) inst.periods.push(time);
                     }
                 });
@@ -1819,7 +1895,7 @@ function renderCapitals(community, containerId, side) {
             const grouped = {};
             related.forEach(a => {
                 const name = a.name;
-                const time = (a.year && a.quarter) ? `${a.year}-Q${a.quarter}` : 'N/A';
+                const time = a.yearsQuarters ? a.yearsQuarters.join(', ') : 'N/A';
                 if (!grouped[name]) grouped[name] = [];
                 grouped[name].push(time);
             });
@@ -2581,7 +2657,8 @@ function populateDashboardFilters() {
 
     // Dynamically populate Year dropdown from activitiesData
     const yearSelect = document.getElementById('dash-filter-year');
-    const years = [...new Set(activitiesData.map(a => a.year))].filter(Boolean).sort((a, b) => b - a);
+    const allYears = [...new Set(activitiesData.flatMap(a => (a.yearsQuarters || []).map(yq => yq.split('-')[0])))];
+    const years = allYears.filter(Boolean).sort((a, b) => b - a);
     yearSelect.innerHTML = '<option value="All">All Years</option>' + years.map(y => `<option value="${y}">${y}</option>`).join('');
 }
 
@@ -2640,8 +2717,15 @@ function updateDashboard() {
     
     activitiesData.forEach(act => {
         // 1. Time Filters
-        if (year !== 'All' && year !== '' && act.year !== year) return;
-        if (quarter !== 'All' && act.quarter !== quarter) return;
+        if (year !== 'All' && year !== '') {
+            const hasYear = act.yearsQuarters && act.yearsQuarters.some(yq => yq.startsWith(year));
+            if (!hasYear) return;
+        }
+        if (quarter !== 'All') {
+            const qCode = quarter.startsWith('Q') ? quarter : `Q${quarter}`;
+            const hasQuarter = act.yearsQuarters && act.yearsQuarters.some(yq => yq.endsWith(qCode));
+            if (!hasQuarter) return;
+        }
 
         // 2. Data Migration Support (Handle old activities if any)
         if (!act.targetEntities && act.beneficiaries) {
@@ -2947,13 +3031,10 @@ function renderInterventionMarkers() {
     interventionsGroup.clearLayers();
 
     const countryVal = document.getElementById('country-select') ? document.getElementById('country-select').value : 'All';
-    const commVal = document.getElementById('community-select') ? document.getElementById('community-select').value : 'All';
 
     let filtered = interventionsData;
 
-    if (commVal !== "All") {
-        filtered = filtered.filter(i => i.communityIds && i.communityIds.includes(commVal));
-    } else if (countryVal !== "All") {
+    if (countryVal !== "All") {
         const commIdsInCountry = new Set(communitiesData.filter(c => c.country === countryVal).map(c => c.id));
         filtered = filtered.filter(i => i.communityIds && i.communityIds.some(cid => commIdsInCountry.has(cid)));
     }
@@ -3035,19 +3116,91 @@ function renderInterventionSidebarList(interventions) {
         return;
     }
 
-    // Ensure main column uses flex logic
-    colInt.style.display = 'flex';
-    colInt.style.flexDirection = 'column';
-    colInt.style.overflow = 'hidden';
+    // 1. Build sidebar structure if not present
+    if (!document.getElementById('interventions-sidebar-comm-filter')) {
+        colInt.style.display = 'flex';
+        colInt.style.flexDirection = 'column';
+        colInt.style.overflow = 'hidden';
 
-    let listHtml = `
-        <div class="column-info" style="padding: 20px 20px 10px 20px; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; background: white;">
-            <h2 style="margin:0; color: var(--primary);">Interventions (${interventions.length})</h2>
-            <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 5px; line-height: 1.3;">Select an intervention to locate it on the map.</p>
-        </div>
-        <div style="flex: 1; overflow-y: auto; padding: 15px 15px 15px 15px; background: #f8fafc;">
-            <div style="display: flex; flex-direction: column; gap: 12px;">
-    `;
+        const countryOptions = '<option value="All">All Countries</option>' + countriesData.sort((a,b) => a.name.localeCompare(b.name)).map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+
+        const headerHtml = `
+            <div class="column-info" style="padding: 20px 20px 10px 20px; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; background: white;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                    <h2 id="interventions-sidebar-title" style="margin:0; color: #d97706;">Interventions</h2>
+                    <button class="toggle-btn-small danger" onclick="closeInterventionMapView()" style="margin:0; padding: 4px 8px; width: auto;">&times; Close</button>
+                </div>
+                <div style="display: flex; gap: 8px; margin-top: 15px;">
+                    <select id="interventions-sidebar-country-filter" class="form-select" style="flex:1;">
+                        ${countryOptions}
+                    </select>
+                    <select id="interventions-sidebar-comm-filter" class="form-select" style="flex:1;">
+                        <option value="All">All Communities</option>
+                    </select>
+                </div>
+                <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 8px; line-height: 1.3;">Select an intervention to locate it on the map.</p>
+            </div>
+            <div style="flex: 1; overflow-y: auto; padding: 15px 15px 15px 15px; background: #f8fafc;">
+                <div id="interventions-sidebar-list-container" style="display: flex; flex-direction: column; gap: 12px;"></div>
+            </div>
+        `;
+        colInt.innerHTML = headerHtml;
+
+        document.getElementById('interventions-sidebar-country-filter').addEventListener('change', () => {
+            renderInterventionSidebarList(interventionsData); // Full set to re-filter
+        });
+        document.getElementById('interventions-sidebar-comm-filter').addEventListener('change', () => {
+            renderInterventionSidebarList(interventionsData); 
+        });
+    }
+
+    const listContainer = document.getElementById('interventions-sidebar-list-container');
+    const filterEl = document.getElementById('interventions-sidebar-comm-filter');
+    const countryEl = document.getElementById('interventions-sidebar-country-filter');
+    const titleEl = document.getElementById('interventions-sidebar-title');
+    if (!listContainer) return;
+
+    // Filter by local Country first
+    const selectedCountry = countryEl.value;
+    let filtered = interventions;
+    if (selectedCountry !== "All") {
+        const commIdsInCountry = new Set(communitiesData.filter(c => c.country === selectedCountry).map(c => c.id));
+        filtered = filtered.filter(i => i.communityIds && i.communityIds.some(cid => commIdsInCountry.has(cid)));
+    }
+
+    // Populate local Community filter from the filtered list (by country)
+    const uniqueCommIds = new Set();
+    filtered.forEach(i => {
+        if (i.communityIds) i.communityIds.forEach(cid => uniqueCommIds.add(cid));
+    });
+    
+    const curComm = filterEl.value;
+    let commOptions = '<option value="All">All Communities</option>';
+    const commsForFilter = communitiesData
+        .filter(c => uniqueCommIds.has(c.id))
+        .sort((a,b) => a.name.localeCompare(b.name));
+    commsForFilter.forEach(c => {
+        commOptions += `<option value="${c.id}">${c.name}</option>`;
+    });
+    filterEl.innerHTML = commOptions;
+    if (uniqueCommIds.has(curComm)) filterEl.value = curComm;
+
+    listContainer.innerHTML = '';
+    
+    // Apply local community filter
+    let filteredList = filtered;
+    if (filterEl.value !== 'All') {
+        filteredList = filtered.filter(i => i.communityIds && i.communityIds.includes(filterEl.value));
+    }
+
+    if (titleEl) {
+        titleEl.innerText = `Interventions (${filteredList.length})`;
+    }
+
+    if (filteredList.length === 0) {
+        listContainer.innerHTML = '<div style="padding: 20px; color: var(--text-muted); text-align: center; margin-top: 20px;">No interventions found for this selection.</div>';
+        return;
+    }
 
     const categoryColors = {
         'Flood Management': '#3b82f6',
@@ -3059,29 +3212,80 @@ function renderInterventionSidebarList(interventions) {
         'Other': '#6b7280'
     };
 
-    interventions.forEach(inter => {
+    filteredList.forEach(inter => {
         const catColor = (inter.category && categoryColors[inter.category]) ? categoryColors[inter.category] : '#d97706';
-        
-        listHtml += `
-            <div class="dash-card sidebar-list-card" style="cursor: pointer; padding: 14px; background: white; border-radius: 12px; transition: transform 0.2s, box-shadow 0.2s;" onclick="zoomToIntervention('${inter.id}')" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 16px rgba(0,0,0,0.06)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 6px rgba(0,0,0,0.04)'">
+        const item = document.createElement('div');
+        item.className = 'dash-card sidebar-list-card';
+        item.style.cursor = 'pointer';
+        item.style.padding = '14px';
+        item.style.background = 'white';
+        item.style.borderRadius = '12px';
+        item.style.transition = 'transform 0.2s, box-shadow 0.2s';
+        item.onmouseover = () => { item.style.transform = 'translateY(-2px)'; item.style.boxShadow = '0 8px 16px rgba(0,0,0,0.06)'; };
+        item.onmouseout = () => { item.style.transform = 'translateY(0)'; item.style.boxShadow = '0 2px 6px rgba(0,0,0,0.04)'; };
+
+        const commListHtml = inter.communityIds && inter.communityIds.length > 0 
+            ? inter.communityIds.map(cid => {
+                const comm = communitiesData.find(c => c.id === cid);
+                const timeStr = inter.yearsQuarters ? inter.yearsQuarters.join(', ') : 'N/A';
+                return comm ? `<li>${comm.name} <span style="color:#64748b; font-size:0.75rem; margin-left:5px;">(${timeStr})</span></li>` : `<li>ID: ${cid}</li>`;
+            }).join('')
+            : '<li>None</li>';
+
+        item.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                 <div style="margin-bottom: 8px;">
                     <h4 style="margin: 0; color: var(--text-main); font-size: 0.95rem;">${inter.name}</h4>
+                    <div style="font-size: 0.75rem; color: #64748b; margin-top: 5px;">
+                        ${inter.category ? `<span style="font-size:0.7rem;background:${catColor};color:white;padding:2px 7px;border-radius:12px;font-weight:600;display:inline-block;margin-bottom:4px;">${inter.category}</span><br>` : ''}
+                        <i data-lucide="calendar" style="width: 12px; height: 12px; vertical-align: middle;"></i> 
+                        ${inter.yearsQuarters ? inter.yearsQuarters.join(', ') : 'N/A'}<br>
+                        <i data-lucide="map-pin" style="width: 12px; height: 12px; vertical-align: middle;"></i> 
+                        ${inter.coords ? `${inter.coords[0].toFixed(3)}, ${inter.coords[1].toFixed(3)}` : 'No valid coordinates'}
+                    </div>
                 </div>
-                ${inter.category ? `<span style="font-size:0.7rem;background:${catColor};color:white;padding:3px 8px;border-radius:12px;font-weight:600;">${inter.category}</span>` : ''}
-                <div style="font-size: 0.75rem; color: #64748b; margin-top: 10px;">
-                    <i data-lucide="map-pin" style="width: 12px; height: 12px; vertical-align: middle;"></i> 
-                    ${inter.coords ? `${inter.coords[0].toFixed(3)}, ${inter.coords[1].toFixed(3)}` : 'No valid coordinates'}
+                <span class="chevron" style="color: var(--text-muted); font-size: 0.8rem; margin-top: 2px;">▼</span>
+            </div>
+            <div class="intervention-details hidden" style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e2e8f0; font-size: 0.8rem; color: var(--text-muted);">
+                <div style="margin-bottom: 8px;">
+                    <strong style="color: var(--text-main);">Summary:</strong><br>
+                    ${inter.description || 'No summary available.'}
+                </div>
+                <div style="margin-bottom: 6px;"><strong style="color: var(--text-main);">Communities Undertaken:</strong>
+                    <ul style="margin: 4px 0 0 16px; padding: 0; list-style-type: disc;">
+                        ${commListHtml}
+                    </ul>
                 </div>
             </div>
         `;
+
+        item.onclick = () => {
+            const details = item.querySelector('.intervention-details');
+            const chevron = item.querySelector('.chevron');
+            const isHidden = details.classList.contains('hidden');
+
+            // Close others
+            listContainer.querySelectorAll('.intervention-details').forEach(d => {
+                if (d !== details) d.classList.add('hidden');
+            });
+            listContainer.querySelectorAll('.chevron').forEach(c => {
+                if (c !== chevron) c.innerText = '▼';
+            });
+
+            if (isHidden) {
+                details.classList.remove('hidden');
+                chevron.innerText = '▲';
+                zoomToIntervention(inter.id);
+            } else {
+                details.classList.add('hidden');
+                chevron.innerText = '▼';
+                resetHighlights();
+                resetInterventionHighlights();
+            }
+        };
+
+        listContainer.appendChild(item);
     });
-
-    listHtml += `
-            </div>
-        </div>
-    `;
-
-    colInt.innerHTML = listHtml;
     if (window.lucide) window.lucide.createIcons();
 }
 
@@ -3089,15 +3293,43 @@ window.zoomToIntervention = function(id) {
     const inter = interventionsData.find(i => i.id === id);
     if (!inter || !inter.coords) return;
     
-    // Zoom and pan smoothly to the exact coordinates
+    // Smoothly pan to the intervention point
     map.flyTo(inter.coords, 14, { animate: true, duration: 1.5 });
+    
+    // Hide other intervention markers
+    interventionsGroup.eachLayer(layer => {
+        const el = layer.getElement();
+        if (el) {
+            if (interventionMarkers[id] === layer) {
+                el.style.display = '';
+                el.classList.add('leaflet-marker-highlighted');
+            } else {
+                el.style.display = 'none';
+            }
+        }
+    });
+
+    // Highlight related communities if any
+    if (inter.communityIds && inter.communityIds.length > 0) {
+        highlightCommunities(inter.communityIds, true, false); // fitBounds=true, hideOthers=false
+    }
     
     // Open the associated Map Popup directly
     if (interventionMarkers[id]) {
         setTimeout(() => {
             interventionMarkers[id].openPopup();
-        }, 300); // slight delay so map adjusts before drawing the bubble
+        }, 300);
     }
+};
+
+window.resetInterventionHighlights = function() {
+    interventionsGroup.eachLayer(layer => {
+        const el = layer.getElement();
+        if (el) {
+            el.style.display = '';
+            el.classList.remove('leaflet-marker-highlighted');
+        }
+    });
 };
 
 // Function showInterventionSidebar was removed as Leaflet tooltips are now used natively.
@@ -3286,18 +3518,25 @@ function openInterventionMapView() {
     sidebar.classList.remove('hidden');
     document.getElementById('col-main').classList.add('hidden');
     
+    // Hide global filters
+    const gf = document.getElementById('global-filters-container');
+    if (gf) gf.classList.add('hidden');
+    
     const colInt = document.getElementById('col-intervention');
     if (colInt) {
         colInt.classList.remove('hidden');
     }
 
     showBtn.classList.add('hidden');
-    closeInterMapBtn.classList.remove('hidden');
+    // closeInterMapBtn removed from here as it's now in sidebar
 }
 
 function closeInterventionMapView() {
     isInterMapMode = false;
     
+    // Show global filters
+    const gf = document.getElementById('global-filters-container');
+    if (gf) gf.classList.remove('hidden');
     // 1. Manage Layers
     if (!map.hasLayer(markersGroup)) map.addLayer(markersGroup);
     if (map.hasLayer(interventionsGroup)) map.removeLayer(interventionsGroup);
@@ -3308,23 +3547,38 @@ function closeInterventionMapView() {
     const colInt = document.getElementById('col-intervention');
     if (colInt) colInt.classList.add('hidden');
     
-    closeInterMapBtn.classList.add('hidden');
+    // closeInterMapBtn removed from here as it's now in sidebar
 
     // 3. Reset View
     const countryName = document.getElementById('country-select').value;
     onCountrySelection(countryName, false);
 }
 
+// ===== OVERVIEW / LANDING PAGE =====
+const viewOverviewBtn = document.getElementById('view-overview-btn');
+if (viewOverviewBtn) {
+    viewOverviewBtn.addEventListener('click', () => {
+        if (typeof isInterMapMode !== 'undefined' && isInterMapMode) {
+            closeInterventionMapView();
+        }
+        const colAct = document.getElementById('col-activities');
+        if (colAct && !colAct.classList.contains('hidden')) {
+            closeActivitiesSidebarView();
+        }
+        const colKnow = document.getElementById('col-knowledge');
+        if (colKnow && !colKnow.classList.contains('hidden')) {
+            closeKnowledgeSidebarView();
+        }
+        
+        onCountrySelection('All');
+    });
+}
+
 // ===== ACTIVITIES SIDEBAR VIEW =====
 const viewActivitiesBtn = document.getElementById('view-activities-btn');
-const closeActivitiesBtn = document.getElementById('close-activities-view-btn');
 
 if (viewActivitiesBtn) {
     viewActivitiesBtn.addEventListener('click', openActivitiesSidebarView);
-}
-
-if (closeActivitiesBtn) {
-    closeActivitiesBtn.addEventListener('click', closeActivitiesSidebarView);
 }
 
 function openActivitiesSidebarView() {
@@ -3339,6 +3593,10 @@ function openActivitiesSidebarView() {
     // 1. Manage UI
     sidebar.classList.remove('hidden');
     document.getElementById('col-main').classList.add('hidden');
+    
+    // Hide global filters
+    const gf = document.getElementById('global-filters-container');
+    if (gf) gf.classList.add('hidden');
     
     const colInt = document.getElementById('col-intervention');
     if (colInt) colInt.classList.add('hidden');
@@ -3358,12 +3616,22 @@ function openActivitiesSidebarView() {
                 commOptions += `<option value="${c.id}">${c.name}</option>`;
             });
 
+            const countryOptions = '<option value="All">All Countries</option>' + countriesData.sort((a,b) => a.name.localeCompare(b.name)).map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+
             let headerHtml = `
                 <div class="column-info" style="padding: 20px 20px 10px 20px; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; background: white;">
-                    <h2 id="activities-sidebar-title" style="margin:0; color: var(--primary);">Activities</h2>
-                    <select id="activities-sidebar-comm-filter" class="form-select" style="margin-top: 10px;">
-                        ${commOptions}
-                    </select>
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <h2 id="activities-sidebar-title" style="margin:0; color: var(--primary);">Activities</h2>
+                        <button class="toggle-btn-small danger" onclick="closeActivitiesSidebarView()" id="close-activities-view-manual-btn" style="margin:0; padding: 4px 8px; width: auto;">&times; Close</button>
+                    </div>
+                    <div style="display: flex; gap: 8px; margin-top: 15px;">
+                        <select id="activities-sidebar-country-filter" class="form-select" style="flex:1;">
+                            ${countryOptions}
+                        </select>
+                        <select id="activities-sidebar-comm-filter" class="form-select" style="flex:1;">
+                            <option value="All">All Communities</option>
+                        </select>
+                    </div>
                     <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 8px; line-height: 1.3;">Click on an activity to view details.</p>
                 </div>
                 <div style="flex: 1; overflow-y: auto; padding: 15px 15px 15px 15px; background: #f8fafc;">
@@ -3372,15 +3640,17 @@ function openActivitiesSidebarView() {
             `;
             colAct.innerHTML = headerHtml;
 
+            document.getElementById('activities-sidebar-country-filter').addEventListener('change', () => {
+                renderActivitiesSidebarList();
+            });
             document.getElementById('activities-sidebar-comm-filter').addEventListener('change', () => {
                 renderActivitiesSidebarList();
             });
         }
     }
 
-    showBtn.classList.add('hidden');
+    if (showBtn) showBtn.classList.add('hidden');
     if (closeInterMapBtn) closeInterMapBtn.classList.add('hidden');
-    closeActivitiesBtn.classList.remove('hidden');
 
     // 3. Render List
     renderActivitiesSidebarList();
@@ -3394,36 +3664,90 @@ function closeActivitiesSidebarView() {
     const colAct = document.getElementById('col-activities');
     if (colAct) colAct.classList.add('hidden');
     
-    closeActivitiesBtn.classList.add('hidden');
     resetHighlights();
 }
 
 function renderActivitiesSidebarList() {
     const listContainer = document.getElementById('activities-sidebar-list-container');
-    const filterEl = document.getElementById('activities-sidebar-comm-filter');
     const titleEl = document.getElementById('activities-sidebar-title');
     if (!listContainer) return;
 
     listContainer.innerHTML = '';
     
-    let filteredActs = activitiesData;
-    if (filterEl && filterEl.value !== 'All') {
-        filteredActs = activitiesData.filter(a => a.communityIds.includes(filterEl.value));
-    }
+    // Dynamic Dropdowns
+    const countryEl = document.getElementById('activities-sidebar-country-filter');
+    const filterEl = document.getElementById('activities-sidebar-comm-filter');
+    if (!countryEl || !filterEl) return;
     
-    if (titleEl) {
-        titleEl.innerText = `Activities (${filteredActs.length})`;
+    const selectedCountry = countryEl.value;
+    let filteredActs = activitiesData;
+    if (selectedCountry !== "All") {
+        const commIdsInCountry = new Set(communitiesData.filter(c => c.country === selectedCountry).map(c => c.id));
+        filteredActs = activitiesData.filter(a => a.communityIds && a.communityIds.some(cid => commIdsInCountry.has(cid)));
     }
 
-    if (filteredActs.length === 0) {
+    // Populate local community filter from the filtered list (by country)
+    const uniqueCommIds = new Set();
+    filteredActs.forEach(a => {
+        if (a.communityIds) a.communityIds.forEach(id => uniqueCommIds.add(id));
+    });
+    
+    const curFilter = filterEl.value;
+    let commOptionsHtml = '<option value="All">All Communities</option>';
+    const commsForFilter = communitiesData
+        .filter(c => uniqueCommIds.has(c.id))
+        .sort((a,b) => a.name.localeCompare(b.name));
+    commsForFilter.forEach(c => {
+        commOptionsHtml += `<option value="${c.id}">${c.name}</option>`;
+    });
+    filterEl.innerHTML = commOptionsHtml;
+    if (uniqueCommIds.has(curFilter)) filterEl.value = curFilter;
+
+    if (filterEl.value !== 'All') {
+        filteredActs = filteredActs.filter(a => a.communityIds.includes(filterEl.value));
+    }
+    
+    // Group by Name to combine reach data
+    const grouped = {};
+    filteredActs.forEach(a => {
+        if (!grouped[a.name]) {
+            grouped[a.name] = {
+                name: a.name,
+                indicatorIds: a.indicatorIds,
+                knowledgeGenerated: a.knowledgeGenerated,
+                instances: [] // each instance has community info and reach
+            };
+        }
+        // One instance per row? Or one per community?
+        // Let's assume one instance per row (which might have multiple communities)
+        grouped[a.name].instances.push(a);
+    });
+
+    const sortedNames = Object.keys(grouped).sort();
+
+    if (titleEl) {
+        titleEl.innerText = `Activities (${sortedNames.length})`;
+    }
+
+    if (sortedNames.length === 0) {
         listContainer.innerHTML = '<div style="padding: 20px; color: var(--text-muted); text-align: center; margin-top: 20px;">No activities found for this selection.</div>';
         return;
     }
 
-    const sorted = [...filteredActs].sort((a,b) => a.name.localeCompare(b.name));
+    sortedNames.forEach(actName => {
+        const group = grouped[actName];
+        
+        // Sum total beneficiaries across all instances
+        const totalB = group.instances.reduce((acc, a) => {
+            const b = a.beneficiaries;
+            acc.men += (b.men||0) + (b.oldMen||0) + (b.newMen||0);
+            acc.women += (b.women||0) + (b.oldWomen||0) + (b.newWomen||0);
+            return acc;
+        }, { men: 0, women: 0 });
 
-    sorted.forEach(act => {
-        const time = (act.year && act.quarter) ? `${act.year}-Q${act.quarter}` : 'N/A';
+        const timeAgg = [...new Set(group.instances.flatMap(a => (a.yearsQuarters || [])))].sort().join(', ');
+        const allIndIds = [...new Set(group.instances.flatMap(a => a.indicatorIds))];
+
         const item = document.createElement('div');
         item.className = 'dash-card sidebar-list-card';
         item.style.cursor = 'pointer';
@@ -3434,8 +3758,8 @@ function renderActivitiesSidebarList() {
         item.onmouseover = () => { item.style.transform = 'translateY(-2px)'; item.style.boxShadow = '0 8px 16px rgba(0,0,0,0.06)'; };
         item.onmouseout = () => { item.style.transform = 'translateY(0)'; item.style.boxShadow = '0 2px 6px rgba(0,0,0,0.04)'; };
 
-        const indText = act.indicatorIds && act.indicatorIds.length > 0
-            ? act.indicatorIds.map(id => {
+        const indText = allIndIds.length > 0
+            ? allIndIds.map(id => {
                 for (const cap in indicatorsData) {
                     if (indicatorsData[cap]) {
                         const found = indicatorsData[cap].find(i => i.id === id);
@@ -3446,35 +3770,32 @@ function renderActivitiesSidebarList() {
               }).join(', ')
             : 'None';
 
-        let benText = 'None specified';
-        if (act.beneficiaries) {
-            const b = act.beneficiaries;
-            const total = (b.men||0) + (b.women||0) + (b.oldMen||0) + (b.oldWomen||0) + (b.newMen||0) + (b.newWomen||0);
-            if (total > 0) {
-                benText = `Total: ${total} (Men: ${(b.men||0)+(b.oldMen||0)+(b.newMen||0)}, Women: ${(b.women||0)+(b.oldWomen||0)+(b.newWomen||0)})`;
-            }
-        }
-
-        const commListHtml = act.communityIds.map(cid => {
-            const comm = communitiesData.find(c => c.id === cid);
-            return comm ? `<li>${comm.name} (${time})</li>` : '';
+        const commListHtml = group.instances.map(a => {
+            const b = a.beneficiaries;
+            const totalRow = (b.men||0) + (b.women||0) + (b.oldMen||0) + (b.oldWomen||0) + (b.newMen||0) + (b.newWomen||0);
+            const perComm = Math.round(totalRow / a.communityIds.length);
+            const time = a.yearsQuarters ? a.yearsQuarters.join(', ') : 'N/A';
+            return a.communityIds.map(cid => {
+                const comm = communitiesData.find(c => c.id === cid);
+                return comm ? `<li>${comm.name} <span style="font-size:0.75rem; color:#64748b;">(${time})</span> - <span style="font-weight:600;">Reach: ${perComm}</span></li>` : '';
+            }).join('');
         }).join('');
         
         item.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                 <div style="margin-bottom: 8px;">
-                    <h4 style="margin: 0; color: var(--text-main); font-size: 0.95rem;">${act.name}</h4>
+                    <h4 style="margin: 0; color: var(--text-main); font-size: 0.95rem;">${actName}</h4>
                     <div style="font-size: 0.75rem; color: #64748b; margin-top: 5px;">
                         <i data-lucide="calendar" style="width: 12px; height: 12px; vertical-align: middle;"></i> 
-                        ${time} | Targets: ${act.targetEntities ? act.targetEntities.length : act.communityIds.length}
+                        ${timeAgg}
                     </div>
                 </div>
                 <span class="chevron" style="color: var(--text-muted); font-size: 0.8rem; margin-top: 2px;">▼</span>
             </div>
             <div class="activity-details-global hidden" style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e2e8f0; font-size: 0.8rem; color: var(--text-muted);">
                 <div style="margin-bottom: 6px;"><strong style="color: var(--text-main);">Indicators:</strong> ${indText}</div>
-                <div style="margin-bottom: 6px;"><strong style="color: var(--text-main);">Beneficiaries:</strong> ${benText}</div>
-                <div style="margin-bottom: 6px;"><strong style="color: var(--text-main);">Knowledge Generated:</strong> ${act.knowledgeGenerated ? '<span style="color:#10b981; font-weight:600;">Yes</span>' : 'No'}</div>
+                <div style="margin-bottom: 6px;"><strong style="color: var(--text-main);">Total Reach:</strong> ${totalB.men + totalB.women} (M: ${totalB.men}, W: ${totalB.women})</div>
+                <div style="margin-bottom: 6px;"><strong style="color: var(--text-main);">Knowledge Generated:</strong> ${group.knowledgeGenerated ? '<span style="color:#10b981; font-weight:600;">Yes</span>' : 'No'}</div>
                 <div style="margin-bottom: 6px;"><strong style="color: var(--text-main);">Communities Undertaken:</strong>
                     <ul style="margin: 4px 0 0 16px; padding: 0; list-style-type: disc;">
                         ${commListHtml || '<li>None</li>'}
@@ -3499,7 +3820,8 @@ function renderActivitiesSidebarList() {
             if (isHidden) {
                 details.classList.remove('hidden');
                 chevron.innerText = '▲';
-                highlightCommunities(act.communityIds, false);
+                const allCommIds = [...new Set(group.instances.flatMap(a => a.communityIds))];
+                highlightCommunities(allCommIds, true);
             } else {
                 details.classList.add('hidden');
                 chevron.innerText = '▼';
@@ -3524,20 +3846,25 @@ function openKnowledgeSidebarView() {
     if (typeof isInterMapMode !== 'undefined' && isInterMapMode) {
         closeInterventionMapView();
     }
-    
-    if (document.getElementById('col-activities') && !document.getElementById('col-activities').classList.contains('hidden')) {
+    const colAct = document.getElementById('col-activities');
+    if (colAct && !colAct.classList.contains('hidden')) {
         closeActivitiesSidebarView();
     }
 
-    // 1. Manage UI
+    isKnowledgeMode = true; 
+    
+    // Hide global filters
+    const gf = document.getElementById('global-filters-container');
+    if (gf) gf.classList.add('hidden');
+    
     sidebar.classList.remove('hidden');
     document.getElementById('col-main').classList.add('hidden');
-    
+
     const colInt = document.getElementById('col-intervention');
     if (colInt) colInt.classList.add('hidden');
     
-    const colAct = document.getElementById('col-activities');
-    if (colAct) colAct.classList.add('hidden');
+    const colActHide = document.getElementById('col-activities');
+    if (colActHide) colActHide.classList.add('hidden');
 
     const colKnow = document.getElementById('col-knowledge');
     if (colKnow) {
@@ -3553,15 +3880,22 @@ function openKnowledgeSidebarView() {
 
         // 2. Build UI if not built
         if (!document.getElementById('knowledge-sidebar-comm-filter')) {
+            const countryOptions = '<option value="All">All Countries</option>' + countriesData.sort((a,b) => a.name.localeCompare(b.name)).map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+
             let headerHtml = `
                 <div class="column-info" style="padding: 20px 20px 10px 20px; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; background: white;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                         <h2 id="knowledge-sidebar-title" style="margin:0; color: #8b5cf6;">Knowledge Hub</h2>
                         <button class="toggle-btn-small danger" onclick="closeKnowledgeSidebarView()" id="close-knowledge-view-btn" style="margin:0; padding: 4px 8px; width: auto;">&times; Close</button>
                     </div>
-                    <select id="knowledge-sidebar-comm-filter" class="form-select" style="margin-top: 15px;">
-                        ${commOptions}
-                    </select>
+                    <div style="display: flex; gap: 8px; margin-top: 15px;">
+                        <select id="knowledge-sidebar-country-filter" class="form-select" style="flex:1;">
+                            ${countryOptions}
+                        </select>
+                        <select id="knowledge-sidebar-comm-filter" class="form-select" style="flex:1;">
+                            <option value="All">All Communities</option>
+                        </select>
+                    </div>
                     <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 8px; line-height: 1.3;">Click on an item to view resources.</p>
                 </div>
                 <div style="flex: 1; overflow-y: auto; padding: 15px 15px 15px 15px; background: #f8fafc;">
@@ -3570,6 +3904,9 @@ function openKnowledgeSidebarView() {
             `;
             colKnow.innerHTML = headerHtml;
 
+            document.getElementById('knowledge-sidebar-country-filter').addEventListener('change', () => {
+                renderKnowledgeSidebarList();
+            });
             document.getElementById('knowledge-sidebar-comm-filter').addEventListener('change', () => {
                 renderKnowledgeSidebarList();
             });
@@ -3584,6 +3921,12 @@ function openKnowledgeSidebarView() {
 }
 
 function closeKnowledgeSidebarView() {
+    isKnowledgeMode = false;
+    
+    // Show global filters
+    const gf = document.getElementById('global-filters-container');
+    if (gf) gf.classList.remove('hidden');
+
     sidebar.classList.remove('hidden');
     document.getElementById('col-main').classList.remove('hidden');
     
@@ -3596,113 +3939,139 @@ function closeKnowledgeSidebarView() {
 function renderKnowledgeSidebarList() {
     const listContainer = document.getElementById('knowledge-sidebar-list-container');
     const filterEl = document.getElementById('knowledge-sidebar-comm-filter');
+    const countryEl = document.getElementById('knowledge-sidebar-country-filter');
     const titleEl = document.getElementById('knowledge-sidebar-title');
     if (!listContainer) return;
 
     listContainer.innerHTML = '';
     
-    // Base filter: Only objects with knowledgeGenerated
-    let knowledgeActs = activitiesData.filter(a => a.knowledgeGenerated);
+    // Base filter: Only activities with knowledgeGenerated
+    let filtered = activitiesData.filter(a => a.knowledgeGenerated);
 
-    if (filterEl && filterEl.value !== 'All') {
-        knowledgeActs = knowledgeActs.filter(a => a.communityIds.includes(filterEl.value));
+    // Sidebar Country Filter
+    const selectedCountry = countryEl ? countryEl.value : 'All';
+    if (selectedCountry !== "All") {
+        const commIdsInCountry = new Set(communitiesData.filter(c => c.country === selectedCountry).map(c => c.id));
+        filtered = filtered.filter(a => a.communityIds && a.communityIds.some(cid => commIdsInCountry.has(cid)));
     }
 
-    // Group by name similar to main tab
-    const grouped = {};
-    knowledgeActs.forEach(a => {
-        const name = a.name;
-        const time = (a.year && a.quarter) ? `${a.year}-Q${a.quarter}` : 'N/A';
-        if (!grouped[name]) grouped[name] = { 
-            times: [], 
-            commIds: [], 
-            links: [], 
-            desc: a.description || '' 
-        };
-        if (!grouped[name].times.includes(time)) grouped[name].times.push(time);
-        if (a.knowledgeLink && !grouped[name].links.includes(a.knowledgeLink)) grouped[name].links.push(a.knowledgeLink);
-        a.communityIds.forEach(cid => { if (!grouped[name].commIds.includes(cid)) grouped[name].commIds.push(cid); });
+    // Populate local community filter from the filtered list (by country)
+    const uniqueCommIds = new Set();
+    filtered.forEach(a => {
+        if (a.communityIds) a.communityIds.forEach(id => uniqueCommIds.add(id));
     });
+    
+    const curFilter = filterEl.value;
+    let commOptionsHtml = '<option value="All">All Communities</option>';
+    const commsForFilter = communitiesData
+        .filter(c => uniqueCommIds.has(c.id))
+        .sort((a,b) => a.name.localeCompare(b.name));
+    commsForFilter.forEach(c => {
+        commOptionsHtml += `<option value="${c.id}">${c.name}</option>`;
+    });
+    filterEl.innerHTML = commOptionsHtml;
+    if (uniqueCommIds.has(curFilter)) filterEl.value = curFilter;
 
-    const keys = Object.keys(grouped).sort((a,b) => a.localeCompare(b));
+    if (filterEl.value !== 'All') {
+        filtered = filtered.filter(a => a.communityIds.includes(filterEl.value));
+    }
+
+    // Sort by time desc (latest first)
+    filtered.sort((a,b) => {
+        const timeA = (a.yearsQuarters && a.yearsQuarters.length) ? a.yearsQuarters[0] : '0';
+        const timeB = (b.yearsQuarters && b.yearsQuarters.length) ? b.yearsQuarters[0] : '0';
+        return timeB.localeCompare(timeA);
+    });
     
     if (titleEl) {
-        titleEl.innerText = `Knowledge Hub (${keys.length})`;
+        titleEl.innerText = `Knowledge Hub (${filtered.length})`;
     }
 
-    if (keys.length === 0) {
-        listContainer.innerHTML = '<div style="padding: 20px; color: var(--text-muted); text-align: center; margin-top: 20px;">No knowledge resources found for this selection.</div>';
+    if (filtered.length === 0) {
+        listContainer.innerHTML = '<div style="padding: 20px; color: var(--text-muted); text-align: center; margin-top: 20px;">No knowledge products found for this selection.</div>';
         return;
     }
 
-    keys.forEach(name => {
+    filtered.forEach(a => {
         const item = document.createElement('div');
         item.className = 'dash-card sidebar-list-card';
         item.style.cursor = 'pointer';
-        item.style.padding = '14px';
+        item.style.padding = '16px';
         item.style.background = 'white';
         item.style.borderRadius = '12px';
         item.style.transition = 'transform 0.2s, box-shadow 0.2s';
         item.style.borderLeft = '4px solid #8b5cf6';
+        item.style.marginBottom = '12px';
         item.onmouseover = () => { item.style.transform = 'translateY(-2px)'; item.style.boxShadow = '0 8px 16px rgba(0,0,0,0.06)'; };
         item.onmouseout = () => { item.style.transform = 'translateY(0)'; item.style.boxShadow = '0 2px 6px rgba(0,0,0,0.04)'; };
 
-        const times = grouped[name].times.sort().join(', ');
-        const links = grouped[name].links;
-        const linkHtml = links.length ? `<div style="margin-top: 8px;">${links.map((l, i) => `<a href="${l}" target="_blank" style="color:#8b5cf6; font-size:0.8rem; text-decoration: underline; margin-right:8px; font-weight:600;" onclick="event.stopPropagation();"><i data-lucide="external-link" style="width:12px; height:12px; margin-bottom:-2px;"></i> Resource ${i+1}</a>`).join('')}</div>` : '<div style="margin-top: 8px; font-size:0.8rem; color:var(--text-muted);">No external links attached.</div>';
+        const productTitle = a.knowledgeTitle || `Learning: ${a.name}`;
+        const publishedYear = a.year || 'N/A';
+        const brief = a.description || 'No brief available.';
+        const activityName = a.name;
         
-        const commListHtml = grouped[name].commIds.map(cid => {
-            const comm = communitiesData.find(c => c.id === cid);
-            return comm ? `<li>${comm.name}</li>` : '';
-        }).join('');
+        const communityNames = a.communityIds.map(cid => {
+            const c = communitiesData.find(comm => comm.id === cid);
+            return c ? c.name : cid;
+        }).join(', ');
+
+        const linkHtml = a.knowledgeLink 
+            ? `<div style="margin-top: 10px;">
+                 <a href="${a.knowledgeLink}" target="_blank" style="color:#8b5cf6; font-size:0.85rem; text-decoration: underline; font-weight:600;" onclick="event.stopPropagation();">
+                   <i data-lucide="external-link" style="width:14px; height:14px; margin-bottom:-2px; margin-right:4px;"></i> View Resource
+                 </a>
+               </div>` 
+            : '<div style="margin-top: 10px; font-size:0.8rem; color:var(--text-muted);">No external links attached.</div>';
 
         item.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                <div style="margin-bottom: 4px;">
-                    <span style="font-weight: 700; color: #8b5cf6; font-size: 0.95rem; display: block; line-height: 1.3;">${name}</span>
-                    <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap;">
-                        <span><i data-lucide="clock" style="width:12px; height:12px; margin-bottom:-2px;"></i> ${times}</span>
-                        <span><i data-lucide="map-pin" style="width:12px; height:12px; margin-bottom:-2px;"></i> ${grouped[name].commIds.length} Communities</span>
+                <div style="flex: 1;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <span style="font-weight: 800; color: #8b5cf6; font-size: 1rem; line-height: 1.3;">${productTitle}</span>
+                        <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+                            <span style="font-size: 0.75rem; background: #f3f4f6; color: #6b7280; padding: 2px 6px; border-radius: 4px; font-weight: 600; white-space: nowrap;">
+                                ${publishedYear}
+                            </span>
+                            <span class="chevron" style="color: var(--text-muted); font-size: 0.8rem;">▼</span>
+                        </div>
                     </div>
-                </div>
-                <div style="color: var(--text-muted); font-size: 0.8rem; font-weight: 700; background: #f8fafc; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0;" class="chevron">▼</div>
-            </div>
-            <div class="expand-details hidden" style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e2e8f0;">
-                <div style="font-size: 0.85rem; color: var(--text-main); margin-bottom: 8px;">
-                    <strong>Description:</strong> ${grouped[name].desc || 'No description provided.'}
-                </div>
-                ${linkHtml}
-                <div style="font-size: 0.85rem; color: var(--text-main); margin-top: 12px;">
-                    <strong>Communities Undertaken:</strong>
-                    <ul style="margin: 5px 0 0 20px; color: var(--text-muted); padding-left:20px;">
-                        ${commListHtml}
-                    </ul>
+                    
+                    <div class="expand-details hidden" style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e2e8f0;">
+                        <div style="font-size: 0.85rem; color: var(--text-main); line-height: 1.5; margin-bottom: 10px; font-style: italic;">
+                            "${brief}"
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 4px; font-size: 0.75rem; color: var(--text-muted);">
+                            <span><strong>Activity:</strong> ${activityName}</span>
+                            <span><strong>Community:</strong> ${communityNames}</span>
+                        </div>
+                        ${linkHtml}
+                    </div>
                 </div>
             </div>
         `;
 
         item.onclick = () => {
-            const details = item.querySelector('.expand-details');
-            const chevron = item.querySelector('.chevron');
-            const isHidden = details.classList.contains('hidden');
-            
-            // Close others
-            listContainer.querySelectorAll('.expand-details').forEach(d => {
-                if (d !== details) d.classList.add('hidden');
-            });
-            listContainer.querySelectorAll('.chevron').forEach(c => {
-                if (c !== chevron) c.innerText = '▼';
-            });
-            
-            if (isHidden) {
-                details.classList.remove('hidden');
-                chevron.innerText = '▲';
-                highlightCommunities(grouped[name].commIds, true);
-            } else {
-                details.classList.add('hidden');
-                chevron.innerText = '▼';
-                resetHighlights();
-            }
+             const details = item.querySelector('.expand-details');
+             const chevron = item.querySelector('.chevron');
+             const isHidden = details.classList.contains('hidden');
+
+             // Close others
+             listContainer.querySelectorAll('.expand-details').forEach(d => {
+                 if (d !== details) d.classList.add('hidden');
+             });
+             listContainer.querySelectorAll('.chevron').forEach(c => {
+                 if (c !== chevron) c.innerText = '▼';
+             });
+
+             if (isHidden) {
+                 details.classList.remove('hidden');
+                 chevron.innerText = '▲';
+                 highlightCommunities(a.communityIds, true);
+             } else {
+                 details.classList.add('hidden');
+                 chevron.innerText = '▼';
+                 resetHighlights();
+             }
         };
         
         listContainer.appendChild(item);
