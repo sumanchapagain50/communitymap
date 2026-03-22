@@ -134,6 +134,9 @@ async function initData() {
                 } else {
                     interventionsData = csvInts;
                 }
+                
+                // Trigger map refresh if interventions view is active
+                if (typeof isInterMapMode !== 'undefined' && isInterMapMode) renderInterventionMarkers();
             }
         }
     } catch (e) {
@@ -175,6 +178,12 @@ function mapCSVToCommunity(row) {
             hhs: parseInt(row.HHs) || 0,
             description: row.Description
         },
+        extent: (row.ExtentN && row.ExtentS && row.ExtentE && row.ExtentW) ? {
+            n: parseFloat(row.ExtentN),
+            s: parseFloat(row.ExtentS),
+            e: parseFloat(row.ExtentE),
+            w: parseFloat(row.ExtentW)
+        } : null,
         gradings: {}
     };
     Object.keys(row).forEach(key => {
@@ -387,7 +396,21 @@ function setupUIHandles() {
             const comm = cid === 'All' ? null : communitiesData.find(c => c.id === cid);
             renderColumn(comm, 'main');
             if (comm) {
-                map.flyTo(comm.coords, 14, { animate: true, duration: 1.5 });
+                if (comm.extent) {
+                    const bounds = L.latLngBounds([comm.extent.n, comm.extent.w], [comm.extent.s, comm.extent.e]);
+                    const padding = getMapPadding();
+                    map.flyToBounds(bounds, { animate: true, duration: 1.5, paddingBottomRight: padding, paddingTopLeft: [50, 50] });
+                } else {
+                    // Original shift-centering logic for single points
+                    const zoomLevel = 14;
+                    let target = comm.coords;
+                    const sb = document.getElementById('sidebar');
+                    if (sb && !sb.classList.contains('hidden') && window.innerWidth > 768) {
+                        const p = map.project(comm.coords, zoomLevel);
+                        target = map.unproject(p.add([200, 0]), zoomLevel);
+                    }
+                    map.flyTo(target, zoomLevel, { animate: true, duration: 1.5 });
+                }
                 highlightCommunities([cid], true, true);
             } else {
                 resetHighlights();
@@ -457,7 +480,7 @@ function finishInit() {
     // Initial Rendering
     populateCountrySelect();
     // renderInterventionMarkers(); // Don't show by default
-    renderCountryMarkers();
+    renderCountryMarkers(false);
     renderColumn(null, 'main');
     initAccordionToggles();
     initTabs();
@@ -521,7 +544,15 @@ function finishInit() {
                     renderMarkers(comm.country); // ensure right country markers
                     highlightCommunities([comm.id]);
                     renderColumn(comm, 'main');
-                    map.flyTo(comm.coords, 13, { animate: true, duration: 1.5 });
+                    
+                    const zoomLevel = 13;
+                    let target = comm.coords;
+                    const sb = document.getElementById('sidebar');
+                    if (sb && !sb.classList.contains('hidden') && window.innerWidth > 768) {
+                        const p = map.project(comm.coords, zoomLevel);
+                        target = map.unproject(p.add([200, 0]), zoomLevel);
+                    }
+                    map.flyTo(target, zoomLevel, { animate: true, duration: 1.5 });
                 }
                 
                 // Highlight marker
@@ -698,6 +729,19 @@ function openEditCommunityForm(community) {
     document.getElementById('new-demo-elderly').value = d.elderly;
     document.getElementById('new-demo-disabilities').value = d.disabilities;
     document.getElementById('new-demo-desc').value = d.description || '';
+    
+    // Pre-fill Extent
+    if (community.extent) {
+        document.getElementById('new-comm-extent-n').value = community.extent.n || '';
+        document.getElementById('new-comm-extent-s').value = community.extent.s || '';
+        document.getElementById('new-comm-extent-e').value = community.extent.e || '';
+        document.getElementById('new-comm-extent-w').value = community.extent.w || '';
+    } else {
+        document.getElementById('new-comm-extent-n').value = '';
+        document.getElementById('new-comm-extent-s').value = '';
+        document.getElementById('new-comm-extent-e').value = '';
+        document.getElementById('new-comm-extent-w').value = '';
+    }
 
     // Pre-fill Resilience
     document.getElementById('new-score-t0').value = community.t0_score;
@@ -863,6 +907,16 @@ document.getElementById('add-comm-submit').addEventListener('click', () => {
             disabilities: parseInt(document.getElementById('new-demo-disabilities').value) || 0,
             description: document.getElementById('new-demo-desc').value
         },
+        extent: (() => {
+            const n = parseFloat(document.getElementById('new-comm-extent-n').value);
+            const s = parseFloat(document.getElementById('new-comm-extent-s').value);
+            const e = parseFloat(document.getElementById('new-comm-extent-e').value);
+            const w = parseFloat(document.getElementById('new-comm-extent-w').value);
+            if (!isNaN(n) && !isNaN(s) && !isNaN(e) && !isNaN(w)) {
+                return { n, s, e, w };
+            }
+            return null;
+        })(),
         gradings: gradings
     };
 
@@ -1014,10 +1068,36 @@ function drawCombinedGauge(canvasId, t0, t1) {
     
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Background arc
+    // Draw 3 segmented intervals (0-33, 33-67, 67-100)
+    ctx.lineWidth = 15;
+    
+    // 0 to 33 (Degraded)
     ctx.beginPath();
-    ctx.arc(cx, cy, r, Math.PI, 0);
-    ctx.lineWidth = 15; ctx.strokeStyle = '#f1f5f9'; ctx.stroke();
+    ctx.arc(cx, cy, r, Math.PI, Math.PI + (Math.PI * 0.33));
+    ctx.strokeStyle = '#fca5a5';
+    ctx.stroke();
+
+    // 33 to 67 (Moderate)
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, Math.PI + (Math.PI * 0.33), Math.PI + (Math.PI * 0.67));
+    ctx.strokeStyle = '#fde047';
+    ctx.stroke();
+
+    // 67 to 100 (Optimal)
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, Math.PI + (Math.PI * 0.67), 0);
+    ctx.strokeStyle = '#86efac';
+    ctx.stroke();
+
+    // Add visual separators for the bounds (33, 67)
+    ctx.lineWidth = 17;
+    ctx.strokeStyle = '#ffffff';
+    [0.33, 0.67].forEach(pct => {
+        ctx.beginPath();
+        const angle = Math.PI + (Math.PI * pct);
+        ctx.arc(cx, cy, r, angle - 0.02, angle + 0.02);
+        ctx.stroke();
+    });
 
     // T0 Needle (Gray) - only if t0 is not null
     if (t0 !== null && t0 !== undefined) {
@@ -1050,7 +1130,7 @@ function drawSimpleGauge(canvasId, value, color) {
 // Marker Logic
 // markersGroup is initialized in finishInit
 
-function renderCountryMarkers() {
+function renderCountryMarkers(animate = true) {
     markersGroup.clearLayers();
     Object.keys(communityMarkers).forEach(k => delete communityMarkers[k]);
 
@@ -1083,11 +1163,28 @@ function renderCountryMarkers() {
 
     if (countriesData.length > 0) {
         const bounds = L.latLngBounds(countriesData.map(c => c.center));
-        map.fitBounds(bounds, { padding: [100, 100], maxZoom: 6 });
+        const padding = getMapPadding();
+        if (animate) {
+            map.flyToBounds(bounds, { paddingBottomRight: padding, paddingTopLeft: [100, 100], duration: 2 });
+        } else {
+            map.fitBounds(bounds, { paddingBottomRight: padding, paddingTopLeft: [100, 100] });
+        }
     }
 }
 
-function onCountrySelection(countryName, repopulateCommunities = true) {
+function getMapPadding() {
+    const sb = document.getElementById('sidebar');
+    const isHidden = sb ? sb.classList.contains('hidden') : true;
+    if (isHidden) return [50, 50];
+    
+    const isMobile = window.innerWidth <= 768;
+    if (isMobile) return [50, 50]; // Sidebar is bottom-fixed in mobile, usually 
+    
+    // Desktop: Sidebar on the right is 400px
+    return [450, 50]; // 400 sidebar + 50 default padding
+}
+
+function onCountrySelection(countryName, repopulateCommunities = true, animate = true) {
     const select = document.getElementById('country-select');
     if (select) select.value = countryName;
     
@@ -1101,23 +1198,27 @@ function onCountrySelection(countryName, repopulateCommunities = true) {
     }
 
     if (countryName === "All") {
-        renderCountryMarkers();
+        renderCountryMarkers(animate);
         resetHighlights();
         renderColumn(null, 'main');
     } else {
-        renderMarkers(countryName);
+        renderMarkers(countryName, animate);
         resetHighlights();
         renderColumn(null, 'main'); // IMPORTANT: Ensure the sidebar layout reflects the country shift instantly
         const country = countriesData.find(c => c.name === countryName);
         if (country && repopulateCommunities) {
-            map.flyTo(country.center, country.zoom || 8, { animate: true, duration: 1.5 });
+            if (animate) {
+                map.flyTo(country.center, country.zoom || 8, { animate: true, duration: 1.5 });
+            } else {
+                map.setView(country.center, country.zoom || 8);
+            }
         }
     }
 }
 
-function renderMarkers(countryFilter = "All") {
+function renderMarkers(countryFilter = "All", animate = true) {
     if (countryFilter === "All") {
-        renderCountryMarkers();
+        renderCountryMarkers(animate);
         return;
     }
 
@@ -1148,7 +1249,12 @@ function renderMarkers(countryFilter = "All") {
 
     if (filteredComms.length > 0) {
         const bounds = L.latLngBounds(filteredComms.map(c => c.coords));
-        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 10 });
+        const padding = getMapPadding();
+        if (animate) {
+            map.fitBounds(bounds, { paddingBottomRight: padding, paddingTopLeft: [50, 50], maxZoom: 10 });
+        } else {
+            map.fitBounds(bounds, { paddingBottomRight: padding, paddingTopLeft: [50, 50], maxZoom: 10 });
+        }
     }
 }
 
@@ -1172,7 +1278,7 @@ function resetHighlights() {
     });
 }
 
-function highlightCommunities(communityIds, fitBounds = true, hideOthers = true) {
+function highlightCommunities(communityIds, fitBounds = true, hideOthers = true, animate = true) {
     // If we're currently in Global Mode (no community markers), clear country badges
     const inGlobalMode = Object.keys(communityMarkers).length === 0;
     if (inGlobalMode) {
@@ -1236,8 +1342,29 @@ function highlightCommunities(communityIds, fitBounds = true, hideOthers = true)
     });
 
     if (fitBounds && markersToFit.length > 0) {
+        const ids = Array.isArray(communityIds) ? communityIds : [communityIds];
+        const padding = getMapPadding();
+        
+        // If it's a single community and has an extent, fit to that extent
+        if (ids.length === 1) {
+            const comm = communitiesData.find(c => c.id === ids[0]);
+            if (comm && comm.extent) {
+                const b = L.latLngBounds([[comm.extent.n, comm.extent.w], [comm.extent.s, comm.extent.e]]);
+                if (animate) {
+                    map.flyToBounds(b, { animate: true, duration: 1.5, paddingBottomRight: padding, paddingTopLeft: [50, 50] });
+                } else {
+                    map.fitBounds(b, { paddingBottomRight: padding, paddingTopLeft: [50, 50] });
+                }
+                return;
+            }
+        }
+        
         const bounds = L.latLngBounds(markersToFit).pad(0.3);
-        map.fitBounds(bounds, { animate: true, duration: 1.5 });
+        if (animate) {
+            map.flyToBounds(bounds, { animate: true, duration: 1.5, paddingBottomRight: padding, paddingTopLeft: [50, 50] });
+        } else {
+            map.fitBounds(bounds, { paddingBottomRight: padding, paddingTopLeft: [50, 50] });
+        }
     }
 }
 
@@ -1551,6 +1678,13 @@ function renderDemographics(community, targetId) {
             <div class="demo-item"><i data-lucide="contact"></i> <div><span class="demo-label">Disabilities</span><span class="demo-value">${d.disabilities.toLocaleString()}</span></div></div>
         </div>
         <div class="demo-description">${d.description}</div>
+        ${community ? `
+            <button class="toggle-btn-small" 
+                    style="margin-top: 15px; width: 100%; border: 1px solid var(--primary); color: var(--primary); background: #eff6ff; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600;" 
+                    onclick="openCommunityMapFor('${community.id}')">
+                <i data-lucide="map"></i> See Community Map
+            </button>
+        ` : ''}
     `;
 
     // Add Theoretical Definitions or Country Brief below aggregate demographics
@@ -3069,7 +3203,7 @@ document.getElementById('cancel-map-click-btn')?.addEventListener('click', () =>
 // ===== INTERVENTION MANAGEMENT =====
 let interventionMarkers = {}; // Global dictionary to reference marker objects
 
-function renderInterventionMarkers() {
+function renderInterventionMarkers(animate = true) {
     if (!interventionsGroup) return;
     interventionsGroup.clearLayers();
 
@@ -3143,7 +3277,11 @@ function renderInterventionMarkers() {
 
     const validCoords = filtered.filter(i => i.coords && !isNaN(i.coords[0])).map(i => i.coords);
     if (validCoords.length > 0) {
-        map.flyToBounds(L.latLngBounds(validCoords), { padding: [50, 50], maxZoom: 12, animate: true, duration: 1.5 });
+        if (animate) {
+            map.flyToBounds(L.latLngBounds(validCoords), { padding: [50, 50], maxZoom: 12, animate: true, duration: 1.5 });
+        } else {
+            map.fitBounds(L.latLngBounds(validCoords), { padding: [50, 50], maxZoom: 12 });
+        }
     }
     
     // Inject all valid interventions into the interactive sidebar list
@@ -3332,12 +3470,26 @@ function renderInterventionSidebarList(interventions) {
     if (window.lucide) window.lucide.createIcons();
 }
 
-window.zoomToIntervention = function(id) {
+window.zoomToIntervention = function(id, animate = true) {
     const inter = interventionsData.find(i => i.id === id);
     if (!inter || !inter.coords) return;
     
-    // Smoothly pan to the intervention point
-    map.flyTo(inter.coords, 14, { animate: true, duration: 1.5 });
+    // Smoothly pan to the intervention point using standard sidebar-aware padding
+    if (animate) {
+        map.flyToBounds(L.latLngBounds([inter.coords, inter.coords]), { 
+            maxZoom: 14, 
+            paddingBottomRight: getMapPadding(), 
+            paddingTopLeft: [50, 50],
+            animate: true,
+            duration: 1.5
+        });
+    } else {
+        map.fitBounds(L.latLngBounds([inter.coords, inter.coords]), { 
+            maxZoom: 14, 
+            paddingBottomRight: getMapPadding(), 
+            paddingTopLeft: [50, 50]
+        });
+    }
     
     // Hide other intervention markers
     interventionsGroup.eachLayer(layer => {
@@ -3539,7 +3691,7 @@ if (closeInterMapBtn) {
     closeInterMapBtn.addEventListener('click', closeInterventionMapView);
 }
 
-function openInterventionMapView() {
+function openInterventionMapView(animate = true) {
     const colAct = document.getElementById('col-activities');
     if (colAct && !colAct.classList.contains('hidden')) {
         closeActivitiesSidebarView();
@@ -3552,7 +3704,7 @@ function openInterventionMapView() {
     isInterMapMode = true;
     
     // 1. Manage Layers
-    renderInterventionMarkers(); // Ensure markers are created before adding
+    renderInterventionMarkers(animate); // Ensure markers are created before adding
     if (map.hasLayer(markersGroup)) map.removeLayer(markersGroup);
     if (!map.hasLayer(interventionsGroup)) map.addLayer(interventionsGroup);
 
@@ -3626,7 +3778,7 @@ if (viewOverviewBtn) {
         }
 
         // Return everything to Global view
-        onCountrySelection('All');
+        onCountrySelection('All', true, false); // Pass animate = false for initial load
     });
 }
 
@@ -4147,12 +4299,19 @@ const commMapFilterCountry = document.getElementById('comm-map-filter-country');
 const commMapFilterCommunity = document.getElementById('comm-map-filter-community');
 const commMapRefreshBtn = document.getElementById('comm-map-refresh-btn');
 
+const commMapPrintBtn = document.getElementById('comm-map-print-btn');
+
 if (communityMapsBtn) {
     communityMapsBtn.addEventListener('click', () => {
         communityMapsModal.classList.remove('hidden');
         initCommunityMap();
-        populateCommMapFilters();
-        renderCommunityMap();
+        
+        // Set Default: Badhupuruwa from Nepal
+        if (commMapFilterCountry) commMapFilterCountry.value = "Nepal";
+        populateCommMapFilters(false); // Update community list for Nepal
+        if (commMapFilterCommunity) commMapFilterCommunity.value = "c_01";
+        
+        renderCommunityMap(false); // Initial render without animation
     });
 }
 
@@ -4162,20 +4321,57 @@ if (closeCommunityMapsModal) {
     });
 }
 
+if (commMapPrintBtn) {
+    commMapPrintBtn.addEventListener('click', () => {
+        // Prepare map for print
+        if (communityMapInstance) {
+            communityMapInstance.closePopup(); // Close any open popup before printing
+            communityMapInstance.invalidateSize();
+        }
+        
+        setTimeout(() => {
+            window.print();
+        }, 500); 
+    });
+}
+
 if (commMapRefreshBtn) {
-    commMapRefreshBtn.addEventListener('click', renderCommunityMap);
+    commMapRefreshBtn.addEventListener('click', () => renderCommunityMap(true)); // Animate on refresh
 }
 
 if (commMapFilterCountry) {
     commMapFilterCountry.addEventListener('change', () => {
         populateCommMapFilters(false); // Update community list based on country
-        renderCommunityMap();
+        renderCommunityMap(true); // Animate on filter change
     });
 }
 
 if (commMapFilterCommunity) {
-    commMapFilterCommunity.addEventListener('change', renderCommunityMap);
+    commMapFilterCommunity.addEventListener('change', () => renderCommunityMap(true)); // Animate on filter change
 }
+
+window.openCommunityMapFor = function(communityId) {
+    const community = communitiesData.find(c => c.id === communityId);
+    if (!community) return;
+
+    // Show modal
+    communityMapsModal.classList.remove('hidden');
+    
+    // Initialize map
+    initCommunityMap();
+    
+    // Set filters
+    if (commMapFilterCountry) commMapFilterCountry.value = community.country;
+    populateCommMapFilters(false); // Update community list for this country
+    if (commMapFilterCommunity) commMapFilterCommunity.value = community.id;
+    
+    // Render and handle centering with sidebar padding
+    renderCommunityMap(true); // Animate when opened for a specific community
+    
+    // Use fitBounds with custom padding to ensure markers are centered in the visible map area
+    // The sidebar is 20% on desktop (flex). Leaflet is in the 80% div.
+    // If we want it centered perfectly, we can use padding to adjust fitBounds.
+};
 
 function initCommunityMap() {
     if (communityMapInstance) {
@@ -4189,6 +4385,9 @@ function initCommunityMap() {
         subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
         attribution: '&copy; <a href="https://maps.google.com">Google Maps</a>'
     }).addTo(communityMapInstance);
+
+    // Scale Bar
+    L.control.scale({ position: 'bottomleft' }).addTo(communityMapInstance);
 
     communityMapMarkersGroup = L.layerGroup().addTo(communityMapInstance);
     
@@ -4217,7 +4416,7 @@ function populateCommMapFilters(resetCountry = true) {
     commMapFilterCommunity.innerHTML = html;
 }
 
-function renderCommunityMap() {
+function renderCommunityMap(animate = true) {
     if (!communityMapInstance || !communityMapMarkersGroup) return;
 
     communityMapMarkersGroup.clearLayers();
@@ -4239,22 +4438,23 @@ function renderCommunityMap() {
 
         // Add resource markers
         commResource.resources.forEach(res => {
+            const iconFile = getResourceIcon(res.type);
             const marker = L.marker([res.lat, res.lng], {
+                resType: res.type, // Store type for highlighting
                 icon: L.divIcon({
                     className: 'resource-marker',
-                    html: `<div style="background: white; border: 2px solid #10b981; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
-                             <i data-lucide="map-pin" style="width: 14px; height: 14px; color: #10b981;"></i>
+                    html: `<div style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                             <img src="${iconFile}" class="resource-icon-print" style="width: 24px; height: 24px;" onerror="this.src='https://unpkg.com/lucide-static@latest/icons/map-pin.svg';">
                            </div>`,
-                    iconSize: [24, 24],
-                    iconAnchor: [12, 12]
+                    iconSize: [28, 28],
+                    iconAnchor: [14, 14]
                 })
             });
             
             marker.bindPopup(`
                 <div style="font-family: inherit; padding: 5px;">
-                    <strong style="color: #10b981;">${res.name}</strong><br>
-                    <span style="font-size: 0.8rem; color: #64748b;">Type: ${res.type}</span><br>
-                    <span style="font-size: 0.8rem; color: #64748b;">Community: ${commInfo.name}</span>
+                    <strong style="color: #10b981;">${res.name}</strong>
+                    ${res.description ? `<br><span style="font-size: 0.85rem; color: #475569; margin-top: 4px; display: block;">${res.description}</span>` : ''}
                 </div>
             `);
             
@@ -4264,15 +4464,142 @@ function renderCommunityMap() {
     });
 
     if (markersToShow.length > 0) {
-        communityMapInstance.fitBounds(L.latLngBounds(markersToShow), { padding: [50, 50], maxZoom: 15 });
+        if (animate) {
+            communityMapInstance.flyToBounds(L.latLngBounds(markersToShow), { padding: [50, 50], maxZoom: 15 });
+        } else {
+            communityMapInstance.fitBounds(L.latLngBounds(markersToShow), { padding: [50, 50], maxZoom: 15 });
+        }
+    } else if (selectedCommId !== "All") {
+        const comm = communitiesData.find(c => c.id === selectedCommId);
+        if (comm) {
+            if (comm.extent) {
+                const b = L.latLngBounds([[comm.extent.n, comm.extent.w], [comm.extent.s, comm.extent.e]]);
+                if (animate) {
+                    communityMapInstance.flyToBounds(b, { padding: [50, 50], maxZoom: 15 });
+                } else {
+                    communityMapInstance.fitBounds(b, { padding: [50, 50], maxZoom: 15 });
+                }
+            } else {
+                if (animate) {
+                    communityMapInstance.flyTo(comm.coords, 15);
+                } else {
+                    communityMapInstance.setView(comm.coords, 15);
+                }
+            }
+        }
     } else if (selectedCountry !== "All") {
         const country = countriesData.find(c => c.name === selectedCountry);
-        if (country) communityMapInstance.setView(country.center, country.zoom || 8);
+        if (country) {
+            if (animate) {
+                communityMapInstance.flyTo(country.center, country.zoom || 8);
+            } else {
+                communityMapInstance.setView(country.center, country.zoom || 8);
+            }
+        }
     } else {
-        communityMapInstance.setView([28.3949, 84.1240], 7);
+        if (animate) {
+            communityMapInstance.flyTo([28.3949, 84.1240], 7);
+        } else {
+            communityMapInstance.setView([28.3949, 84.1240], 7);
+        }
     }
 
+    // Update Legend and Title/Description if needed
+    updateCommMapLegend(selectedCommId, selectedCountry);
+
     if (window.lucide) window.lucide.createIcons();
+}
+
+function getResourceIcon(type) {
+    if (type.endsWith('.svg')) return 'svg/' + type;
+    const map = {
+        'School': 'svg/school.svg',
+        'Hospital': 'svg/health.svg',
+        'Health Post': 'svg/health.svg',
+        'Police': 'svg/police.svg',
+        'Bridge': 'svg/bridge.svg',
+        'Culvert': 'svg/culvert.svg',
+        'Ward Office': 'svg/wardoffice.svg',
+        'Community Center': 'svg/wardoffice.svg',
+        'Safe Shelter': 'svg/safeshelter.svg',
+        'Shop': 'svg/shop.svg',
+        'Market': 'svg/shop.svg',
+        'Hotel': 'svg/shop.svg',
+        'Chowk': 'svg/citycenter.svg'
+    };
+    return map[type] || 'svg/map-pin.svg';
+}
+
+function updateCommMapLegend(selectedCommId, selectedCountry) {
+    const legendEl = document.getElementById('comm-map-legend');
+    const titleEl = document.getElementById('comm-map-details-title');
+    if (!legendEl) return;
+
+    const resources = window.resourcesData || [];
+    const uniqueTypes = new Set();
+    
+    let activeCommName = "Community Resources Map";
+
+    resources.forEach(commResource => {
+        const commInfo = communitiesData.find(c => c.id === commResource.communityId);
+        if (!commInfo) return;
+
+        if (selectedCountry !== "All" && commInfo.country !== selectedCountry) return;
+        if (selectedCommId !== "All" && commInfo.id !== selectedCommId) return;
+
+        commResource.resources.forEach(res => {
+            uniqueTypes.add(res.type);
+        });
+    });
+
+    const modalTitleEl = document.getElementById('comm-maps-modal-title');
+    const modalSubtitleEl = document.getElementById('comm-maps-modal-subtitle');
+    if (modalTitleEl) {
+        if (selectedCommId !== "All") {
+            const comm = communitiesData.find(c => c.id === selectedCommId);
+            modalTitleEl.innerText = comm ? `Community Map: ${comm.name}` : "Community Map";
+            if (modalSubtitleEl) {
+                if (comm) {
+                    const locParts = [comm.municipality, comm.district, comm.province, comm.country].filter(Boolean);
+                    modalSubtitleEl.innerText = locParts.join(', ');
+                } else {
+                    modalSubtitleEl.innerText = "";
+                }
+            }
+        } else if (selectedCountry !== "All") {
+            modalTitleEl.innerText = `Country Map: ${selectedCountry}`;
+            if (modalSubtitleEl) modalSubtitleEl.innerText = "";
+        } else {
+            modalTitleEl.innerText = "Global Resources Map";
+            if (modalSubtitleEl) modalSubtitleEl.innerText = "";
+        }
+    }
+
+    if (titleEl) {
+        titleEl.innerText = activeCommName;
+    }
+
+    let legendHtml = '';
+    uniqueTypes.forEach(type => {
+        const iconFile = getResourceIcon(type);
+        const label = type.replace('.svg', '').replace(/([A-Z])/g, ' $1').trim().replace(/^\w/, c => c.toUpperCase());
+        legendHtml += `
+            <div class="legend-item-clickable" 
+                 onclick="highlightMapResourcesByCategory('${type}', this)"
+                 style="display: flex; align-items: center; gap: 10px; font-size: 0.75rem; color: #475569; padding: 4px 6px; cursor: pointer; border-radius: 6px; transition: background 0.2s;">
+                <div style="width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                    <img src="${iconFile}" class="resource-icon-print" style="width: 20px; height: 20px;" onerror="this.src='https://unpkg.com/lucide-static@latest/icons/map-pin.svg';">
+                </div>
+                <span>${label}</span>
+            </div>
+        `;
+    });
+
+    if (uniqueTypes.size === 0) {
+        legendHtml = '<div style="font-size: 0.7rem; color: #94a3b8; font-style: italic;">No resources found for selection.</div>';
+    }
+
+    legendEl.innerHTML = legendHtml;
 }
 
 // Universal handler for modal close buttons
@@ -4294,6 +4621,57 @@ document.addEventListener('click', (e) => {
 if (typeof initData === 'function') {
     initData();
 }
+
+window.highlightMapResourcesByCategory = function(category, element) {
+    if (!communityMapInstance || !communityMapMarkersGroup) return;
+
+    // Toggle active state on legend item
+    const wasActive = element.classList.contains('legend-active');
+    document.querySelectorAll('.legend-item-clickable').forEach(el => el.classList.remove('legend-active'));
+    
+    // Always close existing popups when switching categories
+    communityMapInstance.closePopup();
+
+    if (wasActive) {
+        // Reset all markers
+        communityMapMarkersGroup.eachLayer(layer => {
+            if (layer instanceof L.Marker) {
+                const icon = layer.getElement();
+                if (icon) icon.classList.remove('resource-dimmed', 'resource-highlighted');
+            }
+        });
+        return;
+    }
+
+    element.classList.add('legend-active');
+    
+    const bounds = communityMapInstance.getBounds();
+    let firstMarkerToOpen = null;
+    
+    communityMapMarkersGroup.eachLayer(layer => {
+        if (layer instanceof L.Marker && layer.options.resType) {
+            const icon = layer.getElement();
+            if (!icon) return;
+
+            const isMatch = layer.options.resType === category;
+            const inExtent = bounds.contains(layer.getLatLng());
+
+            if (isMatch && inExtent) {
+                icon.classList.remove('resource-dimmed');
+                icon.classList.add('resource-highlighted');
+                if (!firstMarkerToOpen) firstMarkerToOpen = layer;
+            } else {
+                icon.classList.add('resource-dimmed');
+                icon.classList.remove('resource-highlighted');
+            }
+        }
+    });
+
+    // Auto-open the popup for the first matching marker in view
+    if (firstMarkerToOpen) {
+        firstMarkerToOpen.openPopup();
+    }
+};
 
 // Handle map resizing on mobile layout shifts
 window.addEventListener('resize', () => {
