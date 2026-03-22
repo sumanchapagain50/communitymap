@@ -4136,6 +4136,145 @@ function renderKnowledgeSidebarList() {
     if (window.lucide) window.lucide.createIcons();
 }
 
+// ===== COMMUNITY MAPS MODAL LOGIC =====
+let communityMapInstance = null;
+let communityMapMarkersGroup = null;
+
+const communityMapsBtn = document.getElementById('community-maps-btn');
+const communityMapsModal = document.getElementById('community-maps-modal');
+const closeCommunityMapsModal = document.getElementById('close-community-maps-modal');
+const commMapFilterCountry = document.getElementById('comm-map-filter-country');
+const commMapFilterCommunity = document.getElementById('comm-map-filter-community');
+const commMapRefreshBtn = document.getElementById('comm-map-refresh-btn');
+
+if (communityMapsBtn) {
+    communityMapsBtn.addEventListener('click', () => {
+        communityMapsModal.classList.remove('hidden');
+        initCommunityMap();
+        populateCommMapFilters();
+        renderCommunityMap();
+    });
+}
+
+if (closeCommunityMapsModal) {
+    closeCommunityMapsModal.addEventListener('click', () => {
+        communityMapsModal.classList.add('hidden');
+    });
+}
+
+if (commMapRefreshBtn) {
+    commMapRefreshBtn.addEventListener('click', renderCommunityMap);
+}
+
+if (commMapFilterCountry) {
+    commMapFilterCountry.addEventListener('change', () => {
+        populateCommMapFilters(false); // Update community list based on country
+        renderCommunityMap();
+    });
+}
+
+if (commMapFilterCommunity) {
+    commMapFilterCommunity.addEventListener('change', renderCommunityMap);
+}
+
+function initCommunityMap() {
+    if (communityMapInstance) {
+        setTimeout(() => communityMapInstance.invalidateSize(), 100);
+        return;
+    }
+
+    communityMapInstance = L.map('comm-map-leaflet').setView([28.3949, 84.1240], 7);
+    L.tileLayer('https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+        maxZoom: 20,
+        subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+        attribution: '&copy; <a href="https://maps.google.com">Google Maps</a>'
+    }).addTo(communityMapInstance);
+
+    communityMapMarkersGroup = L.layerGroup().addTo(communityMapInstance);
+    
+    // Fix for Leaflet in hidden modals
+    setTimeout(() => communityMapInstance.invalidateSize(), 200);
+}
+
+function populateCommMapFilters(resetCountry = true) {
+    if (!commMapFilterCommunity) return;
+
+    // Get IDs of communities that have resources
+    const validCommIds = (window.resourcesData || []).map(r => r.communityId);
+    
+    const selectedCountry = commMapFilterCountry.value;
+    
+    let filteredComms = communitiesData.filter(c => validCommIds.includes(c.id));
+    
+    if (selectedCountry !== "All") {
+        filteredComms = filteredComms.filter(c => c.country === selectedCountry);
+    }
+
+    let html = '<option value="All">All Communities</option>';
+    filteredComms.sort((a,b) => a.name.localeCompare(b.name)).forEach(c => {
+        html += `<option value="${c.id}">${c.name}</option>`;
+    });
+    commMapFilterCommunity.innerHTML = html;
+}
+
+function renderCommunityMap() {
+    if (!communityMapInstance || !communityMapMarkersGroup) return;
+
+    communityMapMarkersGroup.clearLayers();
+    const selectedCountry = commMapFilterCountry.value;
+    const selectedCommId = commMapFilterCommunity.value;
+
+    const resources = window.resourcesData || [];
+    let markersToShow = [];
+
+    resources.forEach(commResource => {
+        const commInfo = communitiesData.find(c => c.id === commResource.communityId);
+        if (!commInfo) return;
+
+        // Apply Country Filter
+        if (selectedCountry !== "All" && commInfo.country !== selectedCountry) return;
+
+        // Apply Community Filter
+        if (selectedCommId !== "All" && commInfo.id !== selectedCommId) return;
+
+        // Add resource markers
+        commResource.resources.forEach(res => {
+            const marker = L.marker([res.lat, res.lng], {
+                icon: L.divIcon({
+                    className: 'resource-marker',
+                    html: `<div style="background: white; border: 2px solid #10b981; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+                             <i data-lucide="map-pin" style="width: 14px; height: 14px; color: #10b981;"></i>
+                           </div>`,
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 12]
+                })
+            });
+            
+            marker.bindPopup(`
+                <div style="font-family: inherit; padding: 5px;">
+                    <strong style="color: #10b981;">${res.name}</strong><br>
+                    <span style="font-size: 0.8rem; color: #64748b;">Type: ${res.type}</span><br>
+                    <span style="font-size: 0.8rem; color: #64748b;">Community: ${commInfo.name}</span>
+                </div>
+            `);
+            
+            communityMapMarkersGroup.addLayer(marker);
+            markersToShow.push([res.lat, res.lng]);
+        });
+    });
+
+    if (markersToShow.length > 0) {
+        communityMapInstance.fitBounds(L.latLngBounds(markersToShow), { padding: [50, 50], maxZoom: 15 });
+    } else if (selectedCountry !== "All") {
+        const country = countriesData.find(c => c.name === selectedCountry);
+        if (country) communityMapInstance.setView(country.center, country.zoom || 8);
+    } else {
+        communityMapInstance.setView([28.3949, 84.1240], 7);
+    }
+
+    if (window.lucide) window.lucide.createIcons();
+}
+
 // Universal handler for modal close buttons
 document.addEventListener('click', (e) => {
     const btn = e.target.closest('.modal-close-x');
@@ -4152,11 +4291,16 @@ document.addEventListener('click', (e) => {
 });
 
 // Start initialization
-initData();
+if (typeof initData === 'function') {
+    initData();
+}
 
 // Handle map resizing on mobile layout shifts
 window.addEventListener('resize', () => {
     if (typeof map !== 'undefined' && map) {
         map.invalidateSize();
+    }
+    if (communityMapInstance) {
+        communityMapInstance.invalidateSize();
     }
 });

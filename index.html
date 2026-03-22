@@ -51,6 +51,7 @@
                         <button id="manage-knowledge-btn" class="dropdown-item admin-only hidden">Manage Knowledge</button>
                         <button id="manage-countries-btn" class="dropdown-item admin-only hidden">Manage Countries</button>
                         <button id="manage-interventions-btn" class="dropdown-item" style="color: #d97706;">📍 Intervention Map</button>
+                        <button id="community-maps-btn" class="dropdown-item" style="color: #10b981;">📍 Community Maps</button>
                         <button id="all-scores-btn" class="dropdown-item" style="color: #2563eb;">📊 All Scores</button>
                         <button id="archived-communities-btn" class="dropdown-item admin-only hidden">Archive</button>
                         <button id="kro-dashboard-btn" class="dropdown-item"> 📈 Reach Dashboard</button>
@@ -609,6 +610,31 @@
         </div>
     </div>
 
+    <!-- Community Maps Modal -->
+    <div id="community-maps-modal" class="modal hidden">
+        <div class="modal-content extra-large" style="display: flex; flex-direction: column; overflow: hidden;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-shrink: 0;">
+                <h3 style="color: #10b981; margin:0;">Community Maps</h3>
+                <button type="button" id="close-community-maps-modal" class="modal-close-x">&times;</button>
+            </div>
+            
+            <div class="dashboard-controls" style="gap: 10px; margin-bottom: 20px; flex-wrap: wrap; flex-shrink: 0;">
+                <select id="comm-map-filter-country">
+                    <option value="All">All Countries</option>
+                    <option value="Nepal">Nepal</option>
+                </select>
+                <select id="comm-map-filter-community">
+                    <option value="All">All Communities</option>
+                </select>
+                <button type="button" id="comm-map-refresh-btn" class="toggle-btn-small primary">Refresh</button>
+            </div>
+            
+            <div style="flex: 1; position: relative;">
+                <div id="comm-map-leaflet" style="width: 100%; height: 100%; min-height: 400px; border-radius: 8px; z-index: 1;"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Admin Dashboard Modal -->
     <div id="admin-dashboard-modal" class="modal hidden">
         <div class="modal-content extra-large" style="display: flex; flex-direction: column; overflow: hidden;">
@@ -812,6 +838,7 @@
     <script src="activities_static.js?v=2"></script>
     <script src="knowledge_static.js?v=2"></script>
     <script src="interventions_static.js?v=2"></script>
+    <script src="resources_static.js?v=1"></script>
     <script src="data.js"></script>
     <script src="app.js"></script>
 
