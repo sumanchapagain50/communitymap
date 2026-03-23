@@ -94,6 +94,16 @@
                     <div class="resilience-scroll-area">
                         <div id="gauge-group-main" class="hidden">
                             <div class="gauge-container">
+                                <div class="gauge-toggles">
+                                    <label><input type="checkbox" id="show-t0-main" checked> T0</label>
+                                    <label><input type="checkbox" id="show-t1-main"> T1</label>
+                                </div>
+                                <div class="type-toggles" style="margin-bottom: 20px;">
+                                    <label class="type-flood"><input type="checkbox" id="filter-flood-main" checked> Floods</label>
+                                    <label class="type-heat"><input type="checkbox" id="filter-heat-main" checked> Heat</label>
+                                    <label class="type-generic"><input type="checkbox" id="filter-generic-main" checked> Generic</label>
+                                </div>
+
                                 <canvas id="gauge-canvas-main"></canvas>
                                 <div class="gauge-labels" style="display: flex; justify-content: space-between; padding: 0 30px; font-weight: 600;">
                                     <span>0</span>
@@ -101,14 +111,9 @@
                                     <span>67</span>
                                     <span>100</span>
                                 </div>
-                                <div class="gauge-toggles">
-                                    <label><input type="checkbox" id="show-t0-main" checked> T0</label>
-                                    <label><input type="checkbox" id="show-t1-main"> T1</label>
-                                </div>
-                                <div class="type-toggles">
-                                    <label class="type-flood"><input type="checkbox" id="filter-flood-main" checked> Floods</label>
-                                    <label class="type-heat"><input type="checkbox" id="filter-heat-main" checked> Heat</label>
-                                    <label class="type-generic"><input type="checkbox" id="filter-generic-main" checked> Generic</label>
+                                
+                                <div id="score-card-legend-main" class="score-card-legend" style="margin-top: 15px;">
+                                    <!-- Populated by JS -->
                                 </div>
                             </div>
                         </div>
@@ -170,6 +175,15 @@
                     </label>
                     <label style="display: flex; align-items: center; gap: 5px; font-size: 0.9rem; margin: 0; cursor: pointer; color: var(--text-main);">
                         <input type="checkbox" id="all-scores-t1-check"> T1
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 5px; font-size: 0.9rem; margin: 0; cursor: pointer; color: #3b82f6;">
+                        <input type="checkbox" id="all-scores-flood-check" checked> Flood
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 5px; font-size: 0.9rem; margin: 0; cursor: pointer; color: #f97316;">
+                        <input type="checkbox" id="all-scores-heat-check" checked> Heat
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 5px; font-size: 0.9rem; margin: 0; cursor: pointer; color: #10b981;">
+                        <input type="checkbox" id="all-scores-generic-check" checked> Generic
                     </label>
                     <select id="all-scores-country-select" class="form-select" style="min-width: 150px;">
                         <option value="All">All Countries</option>
@@ -298,9 +312,11 @@
                 <!-- Tab 3: Resilience Scores -->
                 <div class="form-section hidden" id="form-resilience">
                     <div class="form-grid">
-                        <div class="form-group"><label>Baseline Score (T0)</label><input type="number" id="new-score-t0" value="0" min="0" max="100"></div>
+                        <div class="form-group"><label>Flood Score (T0)</label><input type="number" id="new-score-flood-t0" value="0" min="0" max="100"></div>
+                        <div class="form-group"><label>Heat Score (T0)</label><input type="number" id="new-score-heat-t0" value="0" min="0" max="100"></div>
+                        <div class="form-group"><label>Generic Score (T0)</label><input type="number" id="new-score-generic-t0" value="0" min="0" max="100"></div>
                     </div>
-                    <p class="form-hint" style="margin-top: 8px;">T1 (current) score will be added manually at a later stage.</p>
+                    <p class="form-hint" style="margin-top: 8px;">T1 scores will be added manually at a later stage.</p>
                 </div>
 
                 <!-- Tab 4: Grading -->
@@ -651,6 +667,7 @@
                 <select id="comm-map-filter-community">
                     <option value="All">All Communities</option>
                 </select>
+                
                 <button type="button" id="comm-map-refresh-btn" class="toggle-btn-small primary">Refresh</button>
                 <button type="button" id="comm-map-print-btn" class="toggle-btn-small" style="background: #475569; color: white; border: none;">🖨️ Print Map</button>
             </div>

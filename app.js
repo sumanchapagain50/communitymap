@@ -166,7 +166,12 @@ function mapCSVToCommunity(row) {
             return m.replace(/Palika/gi, "Municipality").trim();
         })(),
         coords: [parseFloat(row.Lat), parseFloat(row.Lng)],
-        t0_score: parseFloat(row.T0_Score) || 0,
+        scores: {
+            flood: { t0: parseFloat(row.Flood_T0) || 0, t1: row.Flood_T1 ? parseFloat(row.Flood_T1) : null },
+            heat: { t0: parseFloat(row.Heat_T0) || 0, t1: row.Heat_T1 ? parseFloat(row.Heat_T1) : null },
+            generic: { t0: parseFloat(row.Generic_T0) || 0, t1: row.Generic_T1 ? parseFloat(row.Generic_T1) : null }
+        },
+        t0_score: parseFloat(row.Generic_T0) || 0,
         t1_score: "N/A",
         demographics: {
             total: parseInt(row.TotalPop) || 0,
@@ -505,8 +510,15 @@ function finishInit() {
     // Wire up All Scores Checkboxes dynamically
     const allScoresT0 = document.getElementById('all-scores-t0-check');
     const allScoresT1 = document.getElementById('all-scores-t1-check');
+    const allScoresFlood = document.getElementById('all-scores-flood-check');
+    const allScoresHeat = document.getElementById('all-scores-heat-check');
+    const allScoresGeneric = document.getElementById('all-scores-generic-check');
+    
     if (allScoresT0) allScoresT0.addEventListener('change', renderAllScoresGrid);
     if (allScoresT1) allScoresT1.addEventListener('change', renderAllScoresGrid);
+    if (allScoresFlood) allScoresFlood.addEventListener('change', renderAllScoresGrid);
+    if (allScoresHeat) allScoresHeat.addEventListener('change', renderAllScoresGrid);
+    if (allScoresGeneric) allScoresGeneric.addEventListener('change', renderAllScoresGrid);
 
     // Quick Activities Button
     const quickActsBtn = document.getElementById('quick-activities-btn');
@@ -563,9 +575,9 @@ function finishInit() {
                     if (el) el.classList.add('leaflet-marker-highlighted');
                 }
                 
-                // Reset expansion state for new community
-                expandedCapitals.clear();
-                expandedIndicators.clear();
+                // Keep expansion state for new community (as requested by user)
+                // expandedCapitals.clear();
+                // expandedIndicators.clear();
             }
         }
     });
@@ -744,8 +756,16 @@ function openEditCommunityForm(community) {
     }
 
     // Pre-fill Resilience
-    document.getElementById('new-score-t0').value = community.t0_score;
-    // Note: T1 score is not pre-filled — it will be added manually later
+    if (community.scores) {
+        document.getElementById('new-score-flood-t0').value = community.scores.flood.t0;
+        document.getElementById('new-score-heat-t0').value = community.scores.heat.t0;
+        document.getElementById('new-score-generic-t0').value = community.scores.generic.t0;
+    } else {
+        document.getElementById('new-score-flood-t0').value = 0;
+        document.getElementById('new-score-heat-t0').value = 0;
+        document.getElementById('new-score-generic-t0').value = community.t0_score || 0;
+    }
+    // Note: T1 scores are not pre-filled — they will be added manually later
 
     // Pre-fill Gradings (T0 only — T1 will be added manually later)
     if (community.gradings) {
@@ -896,7 +916,12 @@ document.getElementById('add-comm-submit').addEventListener('click', () => {
         province: document.getElementById('new-comm-province').value,
         country: document.getElementById('new-comm-country').value,
         coords: [lat, lng],
-        t0_score: parseInt(document.getElementById('new-score-t0').value) || 0,
+        scores: {
+            flood: { t0: parseInt(document.getElementById('new-score-flood-t0').value) || 0, t1: (isEdit && communitiesData.find(c => c.id === editId)?.scores?.flood?.t1) || null },
+            heat: { t0: parseInt(document.getElementById('new-score-heat-t0').value) || 0, t1: (isEdit && communitiesData.find(c => c.id === editId)?.scores?.heat?.t1) || null },
+            generic: { t0: parseInt(document.getElementById('new-score-generic-t0').value) || 0, t1: (isEdit && communitiesData.find(c => c.id === editId)?.scores?.generic?.t1) || null }
+        },
+        t0_score: parseInt(document.getElementById('new-score-generic-t0').value) || 0,
         t1_score: (isEdit && communitiesData.find(c => c.id === editId)) ? (communitiesData.find(c => c.id === editId).t1_score || 0) : 0,
         demographics: {
             total: parseInt(document.getElementById('new-demo-total').value) || 0,
@@ -1025,6 +1050,9 @@ function renderAllScoresGrid() {
     const selectedCountry = allScoresCountrySelect.value;
     const showT0 = document.getElementById('all-scores-t0-check')?.checked ?? true;
     const showT1 = document.getElementById('all-scores-t1-check')?.checked ?? false;
+    const showFlood = document.getElementById('all-scores-flood-check')?.checked ?? true;
+    const showHeat = document.getElementById('all-scores-heat-check')?.checked ?? true;
+    const showGeneric = document.getElementById('all-scores-generic-check')?.checked ?? true;
     
     allScoresGrid.innerHTML = '';
     
@@ -1033,8 +1061,11 @@ function renderAllScoresGrid() {
         : communitiesData.filter(c => c.country === selectedCountry);
 
     filtered.forEach(comm => {
-        const t0val = comm.t0_score || 0;
-        const t1val = comm.t1_score;
+        const scores = comm.scores || { 
+            flood: { t0: 0, t1: null }, 
+            heat: { t0: 0, t1: null }, 
+            generic: { t0: comm.t0_score || 0, t1: null } 
+        };
 
         const card = document.createElement('div');
         card.className = 'score-card';
@@ -1044,8 +1075,20 @@ function renderAllScoresGrid() {
             <div class="score-card-gauge-wrapper">
                 <canvas id="gauge-combined-${comm.id}" class="score-card-canvas-large" width="180" height="100"></canvas>
                 <div class="score-card-legend">
-                    ${showT0 ? `<span style="color:#94a3b8">● T0: ${t0val}</span>` : ''}
-                    ${showT1 ? `<span style="color:#2563eb">● T1: ${t1val || 'N/A'}</span>` : ''}
+                    ${showT0 ? `
+                        <div class="score-row">
+                            ${showFlood ? `<span style="color:#3b82f6">● Flood: ${scores.flood.t0}</span>` : ''}
+                            ${showHeat ? `<span style="color:#f97316">● Heat: ${scores.heat.t0}</span>` : ''}
+                            ${showGeneric ? `<span style="color:#10b981">● Generic: ${scores.generic.t0}</span>` : ''}
+                        </div>
+                    ` : ''}
+                    ${showT1 ? `
+                        <div class="score-row">
+                            ${showFlood ? `<span style="color:#3b82f6">● T1 Flood: ${scores.flood.t1 || 'N/A'}</span>` : ''}
+                            ${showHeat ? `<span style="color:#f97316">● T1 Heat: ${scores.heat.t1 || 'N/A'}</span>` : ''}
+                            ${showGeneric ? `<span style="color:#10b981">● T1 Generic: ${scores.generic.t1 || 'N/A'}</span>` : ''}
+                        </div>
+                    ` : ''}
                 </div>
             </div>
             `}
@@ -1054,13 +1097,13 @@ function renderAllScoresGrid() {
         
         if (showT0 || showT1) {
             setTimeout(() => {
-                drawCombinedGauge(`gauge-combined-${comm.id}`, showT0 ? t0val : null, showT1 ? t1val : null);
+                drawCombinedGauge(`gauge-combined-${comm.id}`, scores, showT0, showT1, showFlood, showHeat, showGeneric);
             }, 0);
         }
     });
 }
 
-function drawCombinedGauge(canvasId, t0, t1) {
+function drawCombinedGauge(canvasId, scores, showT0, showT1, showFlood = true, showHeat = true, showGeneric = true) {
     const canvas = document.getElementById(canvasId);
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -1076,19 +1119,19 @@ function drawCombinedGauge(canvasId, t0, t1) {
     ctx.arc(cx, cy, r, Math.PI, Math.PI + (Math.PI * 0.33));
     ctx.strokeStyle = '#fca5a5';
     ctx.stroke();
-
+ 
     // 33 to 67 (Moderate)
     ctx.beginPath();
     ctx.arc(cx, cy, r, Math.PI + (Math.PI * 0.33), Math.PI + (Math.PI * 0.67));
     ctx.strokeStyle = '#fde047';
     ctx.stroke();
-
+ 
     // 67 to 100 (Optimal)
     ctx.beginPath();
     ctx.arc(cx, cy, r, Math.PI + (Math.PI * 0.67), 0);
     ctx.strokeStyle = '#86efac';
     ctx.stroke();
-
+ 
     // Add visual separators for the bounds (33, 67)
     ctx.lineWidth = 17;
     ctx.strokeStyle = '#ffffff';
@@ -1098,15 +1141,18 @@ function drawCombinedGauge(canvasId, t0, t1) {
         ctx.arc(cx, cy, r, angle - 0.02, angle + 0.02);
         ctx.stroke();
     });
-
-    // T0 Needle (Gray) - only if t0 is not null
-    if (t0 !== null && t0 !== undefined) {
-        drawNeedle(ctx, cx, cy, r - 8, (t0 / 100) * Math.PI, '#94a3b8');
+ 
+    // Needles
+    if (showT0) {
+        if (showFlood) drawNeedle(ctx, cx, cy, r - 8, (scores.flood.t0 / 100) * Math.PI, '#3b82f6');
+        if (showHeat) drawNeedle(ctx, cx, cy, r - 8, (scores.heat.t0 / 100) * Math.PI, '#f97316');
+        if (showGeneric) drawNeedle(ctx, cx, cy, r - 8, (scores.generic.t0 / 100) * Math.PI, '#10b981');
     }
     
-    // T1 Needle (Blue) - only if t1 is not null/undefined
-    if (t1 !== null && t1 !== undefined && t1 !== "") {
-        drawNeedle(ctx, cx, cy, r, (parseFloat(t1) / 100) * Math.PI, '#2563eb');
+    if (showT1) {
+        if (showFlood && scores.flood.t1 !== null) drawNeedle(ctx, cx, cy, r, (scores.flood.t1 / 100) * Math.PI, '#3b82f6');
+        if (showHeat && scores.heat.t1 !== null) drawNeedle(ctx, cx, cy, r, (scores.heat.t1 / 100) * Math.PI, '#f97316');
+        if (showGeneric && scores.generic.t1 !== null) drawNeedle(ctx, cx, cy, r, (scores.generic.t1 / 100) * Math.PI, '#10b981');
     }
 }
 
@@ -1228,7 +1274,13 @@ function renderMarkers(countryFilter = "All", animate = true) {
     const filteredComms = communitiesData.filter(c => c.country === countryFilter);
 
     filteredComms.forEach(community => {
-        const marker = L.marker(community.coords);
+        const icon = L.divIcon({
+            className: 'community-marker-icon',
+            html: '<div class="marker-dot"></div>',
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
+        });
+        const marker = L.marker(community.coords, { icon });
         marker.bindTooltip(community.name); // Standard hover
         marker.on('click', () => {
             resetHighlights();
@@ -1290,7 +1342,13 @@ function highlightCommunities(communityIds, fitBounds = true, hideOthers = true,
         if (!communityMarkers[id]) {
             const comm = communitiesData.find(c => c.id === id);
             if (comm) {
-                const marker = L.marker(comm.coords);
+                const icon = L.divIcon({
+                    className: 'community-marker-icon',
+                    html: '<div class="marker-dot"></div>',
+                    iconSize: [18, 18],
+                    iconAnchor: [9, 9]
+                });
+                const marker = L.marker(comm.coords, { icon });
                 marker.bindTooltip(comm.name);
                 marker.on('click', () => {
                     resetHighlights();
@@ -1458,7 +1516,13 @@ function initTabs() {
 }
 
 // State
-let needleAngles = { main: { t0: 0, t1: 0 } };
+let needleAngles = { 
+    main: { 
+        flood: { t0: 0, t1: 0 },
+        heat: { t0: 0, t1: 0 },
+        generic: { t0: 0, t1: 0 }
+    } 
+};
 let animFrames = { main: null };
 let accordionState = { main: true };
 let expandedCapitals = new Set();
@@ -1492,6 +1556,22 @@ const side = 'main';
         });
     }
 });
+
+function hasTypeData(community, type) {
+    if (!community || !community.gradings) return false;
+    for (const capId in indicatorsData) {
+        const inds = indicatorsData[capId];
+        for (const ind of inds) {
+            if (ind.type === type) {
+                const grade = community.gradings[ind.id]?.t0;
+                if (grade !== undefined && grade !== null && grade !== '' && grade !== 'N/A') {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
 
 function renderColumn(community, colType) {
     const countryFilter = document.getElementById('country-select') ? document.getElementById('country-select').value : 'All';
@@ -1546,7 +1626,34 @@ function renderColumn(community, colType) {
     const gaugeGroup = document.getElementById('gauge-group-main');
     if (community) {
         gaugeGroup.classList.remove('hidden');
-        animateGauge(community.t0_score, community.t1_score, 'gauge-canvas-main', 'main');
+
+        // Dynamic toggle state for hazards
+        ['flood', 'heat', 'generic'].forEach(type => {
+            const toggle = document.getElementById(`filter-${type}-main`);
+            if (toggle) {
+                const capitalizedType = type.charAt(0).toUpperCase() + type.slice(1);
+                const hasData = hasTypeData(community, capitalizedType);
+                
+                // If it was disabled before, we want to re-enable and re-check it if data is present
+                if (toggle.disabled && hasData) {
+                    toggle.checked = true;
+                }
+                
+                toggle.disabled = !hasData;
+                if (!hasData) {
+                    toggle.checked = false;
+                }
+                
+                const label = toggle.closest(`.type-${type}`);
+                if (label) {
+                    label.style.opacity = hasData ? '1' : '0.5';
+                    label.style.cursor = hasData ? 'pointer' : 'not-allowed';
+                    label.title = hasData ? '' : `No ${capitalizedType} data available for this community`;
+                }
+            }
+        });
+
+        animateGauge(community.scores, 'gauge-canvas-main', 'main');
     } else {
         gaugeGroup.classList.add('hidden');
     }
@@ -1915,9 +2022,8 @@ function renderActivities(community, targetId, countryFilter = "All") {
     }
 }
 
-function animateGauge(targetT0, targetT1, canvasId, side) {
-    const startT0 = needleAngles[side].t0;
-    const startT1 = needleAngles[side].t1;
+function animateGauge(targetScores, canvasId, side) {
+    const startAngles = JSON.parse(JSON.stringify(needleAngles[side]));
     let startTime = null;
     const duration = 800;
 
@@ -1925,16 +2031,20 @@ function animateGauge(targetT0, targetT1, canvasId, side) {
         if (!startTime) startTime = timestamp;
         const progress = Math.min((timestamp - startTime) / duration, 1);
         const ease = 1 - Math.pow(1 - progress, 3);
-        needleAngles[side].t0 = startT0 + (targetT0 - startT0) * ease;
-        needleAngles[side].t1 = startT1 + (targetT1 - startT1) * ease;
-        drawGauge(needleAngles[side].t0, needleAngles[side].t1, canvasId, side);
+        
+        ['flood', 'heat', 'generic'].forEach(type => {
+            needleAngles[side][type].t0 = startAngles[type].t0 + ( (targetScores[type].t0 || 0) - startAngles[type].t0) * ease;
+            needleAngles[side][type].t1 = startAngles[type].t1 + ( (targetScores[type].t1 || 0) - startAngles[type].t1) * ease;
+        });
+
+        drawGauge(needleAngles[side], canvasId, side, targetScores);
         if (progress < 1) animFrames[side] = requestAnimationFrame(step);
     }
     cancelAnimationFrame(animFrames[side]);
     animFrames[side] = requestAnimationFrame(step);
 }
 
-function drawGauge(t0, t1, canvasId, side) {
+function drawGauge(angles, canvasId, side, scores = null) {
     const canvas = document.getElementById(canvasId);
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -1949,19 +2059,19 @@ function drawGauge(t0, t1, canvasId, side) {
     ctx.arc(cx, cy, r, Math.PI, Math.PI + (Math.PI * 0.33));
     ctx.strokeStyle = '#fca5a5';
     ctx.stroke();
-
+ 
     // 33 to 67 (Moderate)
     ctx.beginPath();
     ctx.arc(cx, cy, r, Math.PI + (Math.PI * 0.33), Math.PI + (Math.PI * 0.67));
     ctx.strokeStyle = '#fde047';
     ctx.stroke();
-
+ 
     // 67 to 100 (Optimal)
     ctx.beginPath();
     ctx.arc(cx, cy, r, Math.PI + (Math.PI * 0.67), 0);
     ctx.strokeStyle = '#86efac';
     ctx.stroke();
-
+ 
     // Add visual separators for the bounds (33, 67)
     ctx.lineWidth = 22;
     ctx.strokeStyle = '#ffffff';
@@ -1971,12 +2081,47 @@ function drawGauge(t0, t1, canvasId, side) {
         ctx.arc(cx, cy, r, angle - 0.015, angle + 0.015);
         ctx.stroke();
     });
-
+ 
     const showT0 = document.getElementById(`show-t0-${side}`).checked;
     const showT1 = document.getElementById(`show-t1-${side}`).checked;
-
-    if (showT0) drawNeedle(ctx, cx, cy, r - 10, (t0 / 100) * Math.PI, '#94a3b8');
-    if (showT1) drawNeedle(ctx, cx, cy, r, (t1 / 100) * Math.PI, '#2563eb');
+ 
+    const filterFlood = document.getElementById(`filter-flood-${side}`).checked;
+    const filterHeat = document.getElementById(`filter-heat-${side}`).checked;
+    const filterGeneric = document.getElementById(`filter-generic-${side}`).checked;
+ 
+    if (filterFlood) {
+        if (showT0) drawNeedle(ctx, cx, cy, r - 10, (angles.flood.t0 / 100) * Math.PI, '#3b82f6'); // Blue
+        if (showT1 && angles.flood.t1 !== null) drawNeedle(ctx, cx, cy, r, (angles.flood.t1 / 100) * Math.PI, '#3b82f6');
+    }
+    if (filterHeat) {
+        if (showT0) drawNeedle(ctx, cx, cy, r - 10, (angles.heat.t0 / 100) * Math.PI, '#f97316'); // Orange
+        if (showT1 && angles.heat.t1 !== null) drawNeedle(ctx, cx, cy, r, (angles.heat.t1 / 100) * Math.PI, '#f97316');
+    }
+    if (filterGeneric) {
+        if (showT0) drawNeedle(ctx, cx, cy, r - 10, (angles.generic.t0 / 100) * Math.PI, '#10b981'); // Green
+        if (showT1 && angles.generic.t1 !== null) drawNeedle(ctx, cx, cy, r, (angles.generic.t1 / 100) * Math.PI, '#10b981');
+    }
+ 
+    // Update Sidebar Legend if element exists and scores are provided
+    const legend = document.getElementById(`score-card-legend-${side}`);
+    if (legend && scores) {
+        legend.innerHTML = `
+            ${showT0 ? `
+                <div class="score-row">
+                    ${filterFlood ? `<span style="color:#3b82f6">● Flood: ${scores.flood.t0}</span>` : ''}
+                    ${filterHeat ? `<span style="color:#f97316">● Heat: ${scores.heat.t0}</span>` : ''}
+                    ${filterGeneric ? `<span style="color:#10b981">● Generic: ${scores.generic.t0}</span>` : ''}
+                </div>
+            ` : ''}
+            ${showT1 ? `
+                <div class="score-row">
+                    ${filterFlood ? `<span style="color:#3b82f6">● T1 Flood: ${scores.flood.t1 || 'N/A'}</span>` : ''}
+                    ${filterHeat ? `<span style="color:#f97316">● T1 Heat: ${scores.heat.t1 || 'N/A'}</span>` : ''}
+                    ${filterGeneric ? `<span style="color:#10b981">● T1 Generic: ${scores.generic.t1 || 'N/A'}</span>` : ''}
+                </div>
+            ` : ''}
+        `;
+    }
 }
 
 function drawNeedle(ctx, x, y, len, angle, color) {
@@ -4347,7 +4492,7 @@ if (commMapFilterCountry) {
 }
 
 if (commMapFilterCommunity) {
-    commMapFilterCommunity.addEventListener('change', () => renderCommunityMap(true)); // Animate on filter change
+    commMapFilterCommunity.addEventListener('change', () => renderCommunityMap(true));
 }
 
 window.openCommunityMapFor = function(communityId) {
@@ -4380,7 +4525,7 @@ function initCommunityMap() {
     }
 
     communityMapInstance = L.map('comm-map-leaflet').setView([28.3949, 84.1240], 7);
-    L.tileLayer('https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+    L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
         maxZoom: 20,
         subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
         attribution: '&copy; <a href="https://maps.google.com">Google Maps</a>'
@@ -4463,7 +4608,18 @@ function renderCommunityMap(animate = true) {
         });
     });
 
-    if (markersToShow.length > 0) {
+    // Check for predefined extent in resourcesData
+    const resGroup = (window.resourcesData || []).find(rg => rg.communityId === selectedCommId);
+    const dataExtent = resGroup ? resGroup.extent : null;
+
+    if (dataExtent) {
+        const b = L.latLngBounds([[dataExtent.n, dataExtent.w], [dataExtent.s, dataExtent.e]]);
+        if (animate) {
+            communityMapInstance.flyToBounds(b, { padding: [50, 50], maxZoom: 15 });
+        } else {
+            communityMapInstance.fitBounds(b, { padding: [50, 50], maxZoom: 15 });
+        }
+    } else if (markersToShow.length > 0) {
         if (animate) {
             communityMapInstance.flyToBounds(L.latLngBounds(markersToShow), { padding: [50, 50], maxZoom: 15 });
         } else {

@@ -528,12 +528,12 @@ h2 {
 
 .type-flood { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe !important; }
 .type-heat { background: #fff7ed; color: #c2410c; border-color: #ffedd5 !important; }
-.type-generic { background: #f8fafc; color: #475569; border-color: #e2e8f0 !important; }
+.type-generic { background: #ecfdf5; color: #059669; border-color: #d1fae5 !important; }
 
 /* Indicator Background Colors by Type */
 .indicator-flood-bg { background: #eff6ff !important; border-left: 4px solid #3b82f6; }
 .indicator-heat-bg { background: #fff7ed !important; border-left: 4px solid #f97316; }
-.indicator-generic-bg { background: #f8fafc !important; border-left: 4px solid #94a3b8; }
+.indicator-generic-bg { background: #ecfdf5 !important; border-left: 4px solid #10b981; }
 
 /* Capitals & Indicators */
 .capital-item {
@@ -1452,10 +1452,18 @@ h2 {
 
 .score-card-legend {
     display: flex;
-    justify-content: center;
-    gap: 15px;
-    font-size: 0.75rem;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px; /* Vertical gap between rows */
+    font-size: 0.72rem;
     font-weight: 600;
+}
+
+.score-row {
+    display: flex;
+    justify-content: center;
+    gap: 12px; /* Horizontal gap between items */
+    width: 100%;
 }
 
 .comm-label-tooltip {
@@ -1682,4 +1690,39 @@ h2 {
 
 .resource-marker {
     transition: all 0.3s ease;
+}
+
+/* Custom Community Markers */
+.community-marker-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.marker-dot {
+    width: 18px;
+    height: 18px;
+    background: #3b82f6; /* Modern Blue */
+    border: 2px solid white;
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.leaflet-marker-highlighted .marker-dot {
+    background: #ef4444; /* Vivid Red */
+    width: 26px;
+    height: 26px;
+    border-width: 3px;
+    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.2), 0 4px 8px rgba(0,0,0,0.3);
+    z-index: 1000;
+}
+
+/* Ensure tooltips look good with new markers */
+.leaflet-tooltip-pane .leaflet-tooltip {
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-weight: 600;
+    font-size: 0.75rem;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
 }
