@@ -167,9 +167,9 @@ function mapCSVToCommunity(row) {
         })(),
         coords: [parseFloat(row.Lat), parseFloat(row.Lng)],
         scores: {
-            flood: { t0: parseFloat(row.Flood_T0) || 0, t1: row.Flood_T1 ? parseFloat(row.Flood_T1) : null },
-            heat: { t0: parseFloat(row.Heat_T0) || 0, t1: row.Heat_T1 ? parseFloat(row.Heat_T1) : null },
-            generic: { t0: parseFloat(row.Generic_T0) || 0, t1: row.Generic_T1 ? parseFloat(row.Generic_T1) : null }
+            flood: { t0: (row.Flood_T0 === "" || row.Flood_T0 === "N/A" || row.Flood_T0 === undefined) ? null : parseFloat(row.Flood_T0), t1: (row.Flood_T1 === "" || row.Flood_T1 === "N/A" || row.Flood_T1 === undefined) ? null : parseFloat(row.Flood_T1) },
+            heat: { t0: (row.Heat_T0 === "" || row.Heat_T0 === "N/A" || row.Heat_T0 === undefined) ? null : parseFloat(row.Heat_T0), t1: (row.Heat_T1 === "" || row.Heat_T1 === "N/A" || row.Heat_T1 === undefined) ? null : parseFloat(row.Heat_T1) },
+            generic: { t0: (row.Generic_T0 === "" || row.Generic_T0 === "N/A" || row.Generic_T0 === undefined) ? null : parseFloat(row.Generic_T0), t1: (row.Generic_T1 === "" || row.Generic_T1 === "N/A" || row.Generic_T1 === undefined) ? null : parseFloat(row.Generic_T1) }
         },
         t0_score: parseFloat(row.Generic_T0) || 0,
         t1_score: "N/A",
@@ -1075,20 +1075,24 @@ function renderAllScoresGrid() {
             <div class="score-card-gauge-wrapper">
                 <canvas id="gauge-combined-${comm.id}" class="score-card-canvas-large" width="180" height="100"></canvas>
                 <div class="score-card-legend">
-                    ${showT0 ? `
-                        <div class="score-row">
-                            ${showFlood ? `<span style="color:#3b82f6">● Flood: ${scores.flood.t0}</span>` : ''}
-                            ${showHeat ? `<span style="color:#f97316">● Heat: ${scores.heat.t0}</span>` : ''}
-                            ${showGeneric ? `<span style="color:#10b981">● Generic: ${scores.generic.t0}</span>` : ''}
-                        </div>
-                    ` : ''}
-                    ${showT1 ? `
-                        <div class="score-row">
-                            ${showFlood ? `<span style="color:#3b82f6">● T1 Flood: ${scores.flood.t1 || 'N/A'}</span>` : ''}
-                            ${showHeat ? `<span style="color:#f97316">● T1 Heat: ${scores.heat.t1 || 'N/A'}</span>` : ''}
-                            ${showGeneric ? `<span style="color:#10b981">● T1 Generic: ${scores.generic.t1 || 'N/A'}</span>` : ''}
-                        </div>
-                    ` : ''}
+                    ${(() => {
+                        const row0 = [];
+                        if (showT0) {
+                            if (showFlood && scores.flood.t0 !== null) row0.push(`<span style="color:#3b82f6">● Flood: ${scores.flood.t0}</span>`);
+                            if (showHeat && scores.heat.t0 !== null) row0.push(`<span style="color:#f97316">● Heat: ${scores.heat.t0}</span>`);
+                            if (showGeneric && scores.generic.t0 !== null) row0.push(`<span style="color:#10b981">● Generic: ${scores.generic.t0}</span>`);
+                        }
+                        const row1 = [];
+                        if (showT1) {
+                            if (showFlood && scores.flood.t1 !== null) row1.push(`<span style="color:#3b82f6">● T1 Flood: ${scores.flood.t1}</span>`);
+                            if (showHeat && scores.heat.t1 !== null) row1.push(`<span style="color:#f97316">● T1 Heat: ${scores.heat.t1}</span>`);
+                            if (showGeneric && scores.generic.t1 !== null) row1.push(`<span style="color:#10b981">● T1 Generic: ${scores.generic.t1}</span>`);
+                        }
+                        return `
+                            ${row0.length ? `<div class="score-row">${row0.join('')}</div>` : ''}
+                            ${row1.length ? `<div class="score-row">${row1.join('')}</div>` : ''}
+                        `;
+                    })()}
                 </div>
             </div>
             `}
@@ -1144,9 +1148,9 @@ function drawCombinedGauge(canvasId, scores, showT0, showT1, showFlood = true, s
  
     // Needles
     if (showT0) {
-        if (showFlood) drawNeedle(ctx, cx, cy, r - 8, (scores.flood.t0 / 100) * Math.PI, '#3b82f6');
-        if (showHeat) drawNeedle(ctx, cx, cy, r - 8, (scores.heat.t0 / 100) * Math.PI, '#f97316');
-        if (showGeneric) drawNeedle(ctx, cx, cy, r - 8, (scores.generic.t0 / 100) * Math.PI, '#10b981');
+        if (showFlood && scores.flood.t0 !== null) drawNeedle(ctx, cx, cy, r - 8, (scores.flood.t0 / 100) * Math.PI, '#3b82f6');
+        if (showHeat && scores.heat.t0 !== null) drawNeedle(ctx, cx, cy, r - 8, (scores.heat.t0 / 100) * Math.PI, '#f97316');
+        if (showGeneric && scores.generic.t0 !== null) drawNeedle(ctx, cx, cy, r - 8, (scores.generic.t0 / 100) * Math.PI, '#10b981');
     }
     
     if (showT1) {
@@ -1632,7 +1636,10 @@ function renderColumn(community, colType) {
             const toggle = document.getElementById(`filter-${type}-main`);
             if (toggle) {
                 const capitalizedType = type.charAt(0).toUpperCase() + type.slice(1);
-                const hasData = hasTypeData(community, capitalizedType);
+                const hasIndicators = hasTypeData(community, capitalizedType);
+                const overallScore = community.scores[type];
+                const hasOverall = overallScore && (overallScore.t0 !== null || overallScore.t1 !== null);
+                const hasData = hasIndicators || hasOverall;
                 
                 // If it was disabled before, we want to re-enable and re-check it if data is present
                 if (toggle.disabled && hasData) {
@@ -2105,21 +2112,19 @@ function drawGauge(angles, canvasId, side, scores = null) {
     // Update Sidebar Legend if element exists and scores are provided
     const legend = document.getElementById(`score-card-legend-${side}`);
     if (legend && scores) {
+        const row0 = [];
+        if (filterFlood && scores.flood.t0 !== null) row0.push(`<span style="color:#3b82f6">● Flood: ${scores.flood.t0}</span>`);
+        if (filterHeat && scores.heat.t0 !== null) row0.push(`<span style="color:#f97316">● Heat: ${scores.heat.t0}</span>`);
+        if (filterGeneric && scores.generic.t0 !== null) row0.push(`<span style="color:#10b981">● Generic: ${scores.generic.t0}</span>`);
+
+        const row1 = [];
+        if (filterFlood && scores.flood.t1 !== null) row1.push(`<span style="color:#3b82f6">● T1 Flood: ${scores.flood.t1}</span>`);
+        if (filterHeat && scores.heat.t1 !== null) row1.push(`<span style="color:#f97316">● T1 Heat: ${scores.heat.t1}</span>`);
+        if (filterGeneric && scores.generic.t1 !== null) row1.push(`<span style="color:#10b981">● T1 Generic: ${scores.generic.t1}</span>`);
+
         legend.innerHTML = `
-            ${showT0 ? `
-                <div class="score-row">
-                    ${filterFlood ? `<span style="color:#3b82f6">● Flood: ${scores.flood.t0}</span>` : ''}
-                    ${filterHeat ? `<span style="color:#f97316">● Heat: ${scores.heat.t0}</span>` : ''}
-                    ${filterGeneric ? `<span style="color:#10b981">● Generic: ${scores.generic.t0}</span>` : ''}
-                </div>
-            ` : ''}
-            ${showT1 ? `
-                <div class="score-row">
-                    ${filterFlood ? `<span style="color:#3b82f6">● T1 Flood: ${scores.flood.t1 || 'N/A'}</span>` : ''}
-                    ${filterHeat ? `<span style="color:#f97316">● T1 Heat: ${scores.heat.t1 || 'N/A'}</span>` : ''}
-                    ${filterGeneric ? `<span style="color:#10b981">● T1 Generic: ${scores.generic.t1 || 'N/A'}</span>` : ''}
-                </div>
-            ` : ''}
+            ${showT0 && row0.length ? `<div class="score-row">${row0.join('')}</div>` : ''}
+            ${showT1 && row1.length ? `<div class="score-row">${row1.join('')}</div>` : ''}
         `;
     }
 }
